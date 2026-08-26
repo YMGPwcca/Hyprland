@@ -1562,7 +1562,7 @@ void CMonitor::setSpecialWorkspaceVisualState(bool active) {
     *m_specialBlur = active && *PBLURSPECIAL && *PBLUR ? 1.F : 0.F;
 }
 
-void CMonitor::setSpecialWorkspace(const PHLWORKSPACE& pWorkspace, bool noFocus) {
+void CMonitor::setSpecialWorkspace(const PHLWORKSPACE& pWorkspace, bool noFocus, bool preserveAnimationPosition) {
     if (m_activeSpecialWorkspace == pWorkspace)
         return;
 
@@ -1576,7 +1576,7 @@ void CMonitor::setSpecialWorkspace(const PHLWORKSPACE& pWorkspace, bool noFocus)
         // remove special if exists
         if (m_activeSpecialWorkspace) {
             m_activeSpecialWorkspace->m_visible = false;
-            Animation::Workspace::startAnimation(m_activeSpecialWorkspace, Animation::Workspace::ANIMATION_TYPE_OUT, false);
+            Animation::Workspace::startAnimation(m_activeSpecialWorkspace, Animation::Workspace::ANIMATION_TYPE_OUT, false, false, std::nullopt, preserveAnimationPosition);
             IPC::Socket2::sock()->postEvent({"activespecial", std::format(",{}", m_name)});
             IPC::Socket2::sock()->postEvent({"activespecialv2", std::format(",,{}", m_name)});
 
