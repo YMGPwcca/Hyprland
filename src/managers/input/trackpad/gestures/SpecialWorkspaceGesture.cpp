@@ -5,6 +5,7 @@
 #include "../../../../desktop/state/FocusState.hpp"
 #include "../../../../render/Renderer.hpp"
 
+#include "../../../../animation/WorkspaceAnimationController.hpp"
 #include <cmath>
 
 #include <hyprutils/memory/Casts.hpp>
@@ -33,15 +34,69 @@ void CSpecialWorkspaceGesture::begin(const ITrackpadGesture::STrackpadGestureBeg
 
     m_specialWorkspace = State::workspaceState()->query().name(std::format("special:{}", m_specialWorkspaceName)).run();
 
+    // Direction is intentional: up opens only, down closes only.
+    if (!m_specialWorkspace && e.direction == TRACKPAD_GESTURE_DIR_DOWN)
+        return;
+
     if (m_specialWorkspace) {
         m_animatingOut = m_specialWorkspace->isVisible();
-        m_monitor      = m_animatingOut ? m_specialWorkspace->m_monitor : Desktop::focusState()->monitor();
+
+        if ((e.direction == TRACKPAD_GESTURE_DIR_UP && m_animatingOut) ||
+            (e.direction == TRACKPAD_GESTURE_DIR_DOWN && !m_animatingOut)) {
+            m_specialWorkspace.reset();
+            return;
+        }
+
+        m_monitor = m_animatingOut ? m_specialWorkspace->m_monitor : Desktop::focusState()->monitor();
 
         if (!m_monitor)
             return;
 
-        if (!m_animatingOut)
+        if (!m_animatingOut) {
             m_monitor->setSpecialWorkspace(m_specialWorkspace);
+        } else {
+            // Freeze an in-flight open animation at its current value. begun()
+            // is the animation's old start (often the hidden start position),
+            // not the position under the user's fingers.
+            const auto CURR_WS_ALPHA  = m_specialWorkspace->m_alpha->value();
+            const auto CURR_WS_OFFSET = m_specialWorkspace->m_renderOffset->value();
+            const auto CURR_MON_FADE  = m_monitor->m_specialFade->value();
+            const auto CURR_MON_DIM   = m_monitor->m_specialDim->value();
+            const auto CURR_MON_BLUR  = m_monitor->m_specialBlur->value();
+
+            m_specialWorkspace->m_alpha->setValueAndWarp(CURR_WS_ALPHA);
+            m_specialWorkspace->m_renderOffset->setValueAndWarp(CURR_WS_OFFSET);
+            m_monitor->m_specialFade->setValueAndWarp(CURR_MON_FADE);
+            m_monitor->m_specialDim->setValueAndWarp(CURR_MON_DIM);
+            m_monitor->m_specialBlur->setValueAndWarp(CURR_MON_BLUR);
+
+            // Ask the normal animation controller for the exact configured
+            // close target, but preserve the current value (no teleport).
+            Animation::Workspace::startAnimation(
+                m_specialWorkspace,
+                Animation::Workspace::ANIMATION_TYPE_OUT,
+                false,
+                false,
+                std::nullopt,
+                true);
+
+            m_monitorFadeFrom     = CURR_MON_FADE;
+            m_monitorFadeTo       = 0.F;
+            m_monitorDimFrom      = CURR_MON_DIM;
+            m_monitorDimTo        = 0.F;
+            m_monitorBlurFrom     = CURR_MON_BLUR;
+            m_monitorBlurTo       = 0.F;
+            m_workspaceAlphaFrom  = CURR_WS_ALPHA;
+            m_workspaceAlphaTo    = m_specialWorkspace->m_alpha->goal();
+            m_workspaceOffsetFrom = CURR_WS_OFFSET;
+            m_workspaceOffsetTo   = m_specialWorkspace->m_renderOffset->goal();
+
+            // Keep the workspace at the touch-down position until update()
+            // supplies the first real finger delta.
+            m_specialWorkspace->m_alpha->setValueAndWarp(CURR_WS_ALPHA);
+            m_specialWorkspace->m_renderOffset->setValueAndWarp(CURR_WS_OFFSET);
+            return;
+        }
     } else {
         m_monitor = Desktop::focusState()->monitor();
 
@@ -79,7 +134,7 @@ void CSpecialWorkspaceGesture::update(const ITrackpadGesture::STrackpadGestureUp
 
     m_lastDelta += distance(e);
 
-    const auto FADEPERCENT = m_animatingOut ? 1.F - std::clamp(m_lastDelta / MAX_DISTANCE, 0.F, 1.F) : std::clamp(m_lastDelta / MAX_DISTANCE, 0.F, 1.F);
+    const auto FADEPERCENT = std::clamp(m_lastDelta / MAX_DISTANCE, 0.F, 1.F);
 
     m_monitor->m_specialFade->setValueAndWarp(std::lerp(m_monitorFadeFrom, m_monitorFadeTo, FADEPERCENT));
     m_monitor->m_specialDim->setValueAndWarp(std::lerp(m_monitorDimFrom, m_monitorDimTo, FADEPERCENT));
@@ -93,6 +148,22 @@ void CSpecialWorkspaceGesture::end(const ITrackpadGesture::STrackpadGestureEnd& 
         return;
 
     const auto COMPLETION = std::clamp(m_lastDelta / MAX_DISTANCE, 0.F, 1.F);
+
+    if (m_animatingOut) {
+        if (COMPLETION < 0.3F) {
+            // cancel: animate back to the exact position held at touch-down
+            *m_monitor->m_specialFade           = m_monitorFadeFrom;
+            *m_monitor->m_specialDim            = m_monitorDimFrom;
+            *m_monitor->m_specialBlur           = m_monitorBlurFrom;
+            *m_specialWorkspace->m_renderOffset = m_workspaceOffsetFrom;
+            *m_specialWorkspace->m_alpha        = m_workspaceAlphaFrom;
+        } else {
+            // commit: preserve the finger position and let the normal close
+            // path animate to the configured close target without teleporting
+            m_monitor->setSpecialWorkspace(nullptr, false, true);
+        }
+        return;
+    }
 
     if (COMPLETION < 0.3F) {
         // cancel the operation, which effectively means just flip the animation direction
