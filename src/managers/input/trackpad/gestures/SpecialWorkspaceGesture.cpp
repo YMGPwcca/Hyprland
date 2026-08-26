@@ -53,7 +53,16 @@ void CSpecialWorkspaceGesture::begin(const ITrackpadGesture::STrackpadGestureBeg
             return;
 
         if (!m_animatingOut) {
+            // Reopening may interrupt an in-flight close. setSpecialWorkspace()
+            // establishes the configured open targets, then restore the current
+            // workspace position so the animation reverses without teleporting.
+            const auto CURR_WS_ALPHA  = m_specialWorkspace->m_alpha->value();
+            const auto CURR_WS_OFFSET = m_specialWorkspace->m_renderOffset->value();
+
             m_monitor->setSpecialWorkspace(m_specialWorkspace);
+
+            m_specialWorkspace->m_alpha->setValue(CURR_WS_ALPHA);
+            m_specialWorkspace->m_renderOffset->setValue(CURR_WS_OFFSET);
         } else {
             // Freeze an in-flight open animation at its current value. begun()
             // is the animation's old start (often the hidden start position),
@@ -151,12 +160,17 @@ void CSpecialWorkspaceGesture::end(const ITrackpadGesture::STrackpadGestureEnd& 
 
     if (m_animatingOut) {
         if (COMPLETION < 0.3F) {
-            // cancel: animate back to the exact position held at touch-down
-            *m_monitor->m_specialFade           = m_monitorFadeFrom;
-            *m_monitor->m_specialDim            = m_monitorDimFrom;
-            *m_monitor->m_specialBlur           = m_monitorBlurFrom;
-            *m_specialWorkspace->m_renderOffset = m_workspaceOffsetFrom;
-            *m_specialWorkspace->m_alpha        = m_workspaceAlphaFrom;
+            // Cancel the close by restoring the configured open animation from
+            // the exact finger position. This also restores the IN animation
+            // config if the close interrupted an in-flight open.
+            const auto CURR_WS_ALPHA  = m_specialWorkspace->m_alpha->value();
+            const auto CURR_WS_OFFSET = m_specialWorkspace->m_renderOffset->value();
+
+            m_monitor->setSpecialWorkspaceVisualState(true);
+            Animation::Workspace::startAnimation(m_specialWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true);
+
+            m_specialWorkspace->m_alpha->setValue(CURR_WS_ALPHA);
+            m_specialWorkspace->m_renderOffset->setValue(CURR_WS_OFFSET);
         } else {
             // commit: preserve the finger position and let the normal close
             // path animate to the configured close target without teleporting
