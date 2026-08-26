@@ -18,11 +18,12 @@
 using namespace Hyprutils::String;
 using namespace Desktop::View;
 
-void Animation::Workspace::startAnimation(PHLWORKSPACE ws, eAnimationType type, bool left, bool instant, std::optional<std::string> style) {
+void Animation::Workspace::startAnimation(PHLWORKSPACE ws, eAnimationType type, bool left, bool instant, std::optional<std::string> style, bool preserveCurrent) {
     if (!ws)
         return;
 
     const bool IN = type == ANIMATION_TYPE_IN;
+    const bool PRESERVE_CURRENT = preserveCurrent && !IN;
 
     if (!instant) {
         const std::string ANIMNAME = std::format("{}{}", ws->m_isSpecialWorkspace ? "specialWorkspace" : "workspaces", IN ? "In" : "Out");
@@ -79,8 +80,10 @@ void Animation::Workspace::startAnimation(PHLWORKSPACE ws, eAnimationType type, 
     }
 
     if (ANIMSTYLE.starts_with("slidefade")) {
-        ws->m_alpha->setValueAndWarp(1.F);
-        ws->m_renderOffset->setValueAndWarp(Vector2D(0, 0));
+        if (!PRESERVE_CURRENT) {
+            ws->m_alpha->setValueAndWarp(1.F);
+            ws->m_renderOffset->setValueAndWarp(Vector2D(0, 0));
+        }
 
         if (vert) {
             if (IN) {
@@ -89,7 +92,8 @@ void Animation::Workspace::startAnimation(PHLWORKSPACE ws, eAnimationType type, 
                 *ws->m_alpha        = 1.F;
                 *ws->m_renderOffset = Vector2D(0, 0);
             } else {
-                ws->m_alpha->setValueAndWarp(1.F);
+                if (!PRESERVE_CURRENT)
+                    ws->m_alpha->setValueAndWarp(1.F);
                 *ws->m_alpha        = 0.F;
                 *ws->m_renderOffset = Vector2D(0.0, (left ? -PMONITOR->m_size.y : PMONITOR->m_size.y) * (movePerc / 100.F));
             }
@@ -100,24 +104,28 @@ void Animation::Workspace::startAnimation(PHLWORKSPACE ws, eAnimationType type, 
                 *ws->m_alpha        = 1.F;
                 *ws->m_renderOffset = Vector2D(0, 0);
             } else {
-                ws->m_alpha->setValueAndWarp(1.F);
+                if (!PRESERVE_CURRENT)
+                    ws->m_alpha->setValueAndWarp(1.F);
                 *ws->m_alpha        = 0.F;
                 *ws->m_renderOffset = Vector2D((left ? -PMONITOR->m_size.x : PMONITOR->m_size.x) * (movePerc / 100.F), 0.0);
             }
         }
     } else if (ANIMSTYLE == "fade") {
-        ws->m_renderOffset->setValueAndWarp(Vector2D(0, 0));
+        if (!PRESERVE_CURRENT)
+            ws->m_renderOffset->setValueAndWarp(Vector2D(0, 0));
 
         if (IN) {
             ws->m_alpha->setValueAndWarp(0.F);
             *ws->m_alpha = 1.F;
         } else {
-            ws->m_alpha->setValueAndWarp(1.F);
+            if (!PRESERVE_CURRENT)
+                ws->m_alpha->setValueAndWarp(1.F);
             *ws->m_alpha = 0.F;
         }
     } else if (vert) {
         const auto YDISTANCE = (PMONITOR->m_size.y + *PWORKSPACEGAP) * (movePerc / 100.F);
-        ws->m_alpha->setValueAndWarp(1.F);
+        if (!PRESERVE_CURRENT)
+            ws->m_alpha->setValueAndWarp(1.F);
 
         if (IN) {
             ws->m_renderOffset->setValueAndWarp(Vector2D(0.0, left ? YDISTANCE : -YDISTANCE));
@@ -126,7 +134,8 @@ void Animation::Workspace::startAnimation(PHLWORKSPACE ws, eAnimationType type, 
             *ws->m_renderOffset = Vector2D(0.0, left ? -YDISTANCE : YDISTANCE);
     } else {
         const auto XDISTANCE = (PMONITOR->m_size.x + *PWORKSPACEGAP) * (movePerc / 100.F);
-        ws->m_alpha->setValueAndWarp(1.F);
+        if (!PRESERVE_CURRENT)
+            ws->m_alpha->setValueAndWarp(1.F);
 
         if (IN) {
             ws->m_renderOffset->setValueAndWarp(Vector2D(left ? XDISTANCE : -XDISTANCE, 0.0));
@@ -140,7 +149,8 @@ void Animation::Workspace::startAnimation(PHLWORKSPACE ws, eAnimationType type, 
             ws->m_alpha->setValueAndWarp(0.F);
             *ws->m_alpha = 1.F;
         } else {
-            ws->m_alpha->setValueAndWarp(1.F);
+            if (!PRESERVE_CURRENT)
+                ws->m_alpha->setValueAndWarp(1.F);
             *ws->m_alpha = 0.F;
         }
     }

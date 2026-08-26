@@ -273,7 +273,7 @@ namespace Monitor {
         float        getDefaultScale();
         void         changeWorkspace(const PHLWORKSPACE& pWorkspace, bool internal = false, bool noMouseMove = false, bool noFocus = false);
         void         changeWorkspace(const WORKSPACEID& id, bool internal = false, bool noMouseMove = false, bool noFocus = false);
-        void         setSpecialWorkspace(const PHLWORKSPACE& pWorkspace, bool noFocus = false);
+        void         setSpecialWorkspace(const PHLWORKSPACE& pWorkspace, bool noFocus = false, bool preserveAnimationPosition = false);
         void         setSpecialWorkspace(const WORKSPACEID& id, bool noFocus = false);
         PHLWORKSPACE getCurrentWorkspace();
         WORKSPACEID  activeWorkspaceID();

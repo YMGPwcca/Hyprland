@@ -12,7 +12,7 @@ namespace Animation::Workspace {
     };
 
     // TODO: do something about this it sucks
-    void startAnimation(PHLWORKSPACE ws, eAnimationType type, bool left = true, bool instant = false, std::optional<std::string> style = std::nullopt);
+    void startAnimation(PHLWORKSPACE ws, eAnimationType type, bool left = true, bool instant = false, std::optional<std::string> style = std::nullopt, bool preserveCurrent = false);
 
     void setFullscreenFadeAnimation(PHLWORKSPACE ws, eAnimationType type);
     void setFullscreenFloatingFade(PHLWINDOW pWindow, float fade);
