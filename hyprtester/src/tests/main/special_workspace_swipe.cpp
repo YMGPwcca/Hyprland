@@ -23,7 +23,7 @@ namespace SpecialWorkspaceSwipeTests {
             local function near(actual, expected, label)
                 assert(math.abs(actual - expected) < 0.0001, label .. ': expected ' .. expected .. ', got ' .. actual)
             end
-            local function preview(opened, forced, distance)
+            local function preview(opened, forced, distance, initial_alpha)
                 local s = snapshot()
                 eq(s.exists, true, 'fixture workspace exists')
                 eq(s.gesture_alive, true, 'gesture object exists')
@@ -33,7 +33,9 @@ namespace SpecialWorkspaceSwipeTests {
                 eq(s.forced, true, 'preview rendering hold')
                 eq(s.acquired, not forced, 'hold ownership')
                 local progress = math.min(math.max(distance / 150, 0), 1)
-                near(s.alpha, opened and 1 - progress or progress, 'preview alpha')
+                local start = initial_alpha or (opened and 1 or 0)
+                local target = opened and 0 or 1
+                near(s.alpha, start + (target - start) * progress, 'preview alpha')
                 near(s.alpha_goal, s.alpha, 'preview alpha warped')
             end
             local function finished(opened, forced)
@@ -349,8 +351,9 @@ namespace SpecialWorkspaceSwipeTests {
                 p.special_swipe_begin()
                 p.special_swipe_update(20)
                 preview(false, false, 20)
+                local initial_alpha = snapshot().alpha
                 p.special_swipe_reentrant_end()
-                preview(false, false, 75)
+                preview(false, false, 75, initial_alpha)
                 p.special_swipe_end(false)
                 finished(true, false)
             )",
