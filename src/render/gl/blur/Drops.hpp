@@ -1,27 +1,26 @@
 #pragma once
 
 #include "Glass.hpp"
+#include "BlurAnimationClock.hpp"
 
 #include "../../../helpers/signal/Signal.hpp"
-#include "../../../helpers/time/Time.hpp"
 
 namespace Render::GL {
     class CDropsBlurMaterial final : public CGlassBlurMaterial {
       public:
         CDropsBlurMaterial();
 
-        bool isAnimated() const noexcept override;
+        bool isAnimated(CRenderContext& ctx) const noexcept override;
 
-        void bindFinish(WP<CShader> shader, const SBlurMaterialContext& context) const override;
+        void bindFinish(CRenderContext& ctx, WP<CShader> shader, const SBlurMaterialContext& context) const override;
 
       private:
-        void                    updateAnimation(float speed) const;
-        float                   animationPhase() const;
+        float                       animationPhase(CRenderContext& ctx) const;
 
-        mutable Time::steady_tp m_lastAnimationUpdate;
-        mutable double          m_animationTime = 0.0;
-        mutable float           m_previousSpeed = 0.F;
-        CHyprSignalListener     m_configListener;
+        mutable CBlurAnimationClock m_animationClock;
+        CHyprSignalListener         m_configListener;
+
+        friend class CBlurAnimationClockTestAccessor;
     };
 
     class CDropsBlurProvider final : public CGlassBlurProvider {

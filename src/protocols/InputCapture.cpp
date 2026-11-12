@@ -19,8 +19,8 @@
 #include <fcntl.h>
 #include <glaze/core/context.hpp>
 #include <glaze/util/parse.hpp>
-#include <hyprlang.hpp>
 #include <hyprutils/memory/SharedPtr.hpp>
+#include <hyprutils/os/FileDescriptor.hpp>
 #include <libeis.h>
 #include <optional>
 #include <string>
@@ -33,6 +33,7 @@ CInputCaptureResource::CInputCaptureResource(SP<CHyprlandInputCaptureV1> resourc
     LOG(Log::INFO, "[input-capture]({}) new session", m_sessionId.c_str());
 
     m_resource->setOnDestroy([this](CHyprlandInputCaptureV1* r) { PROTO::inputCapture->destroyResource(this); }); //Remove & free this session
+    m_resource->setDestroy([this](CHyprlandInputCaptureV1* r) { PROTO::inputCapture->destroyResource(this); });
 
     m_resource->setEnable([this](CHyprlandInputCaptureV1* r) { onEnable(); });
     m_resource->setAddBarrier(
@@ -43,9 +44,8 @@ CInputCaptureResource::CInputCaptureResource(SP<CHyprlandInputCaptureV1> resourc
 
     m_eis = makeUnique<CEis>(std::format("eis-{}", eisCounter++));
 
-    const int EISFD = m_eis->getFileDescriptor();
-    if (EISFD >= 0)
-        m_resource->sendEisFd(EISFD);
+    if (Hyprutils::OS::CFileDescriptor eisFd{m_eis->getFileDescriptor()}; eisFd.isValid())
+        m_resource->sendEisFd(eisFd.get());
     else
         LOG(Log::ERR, "[input-capture]({}) failed to create EIS client fd", m_sessionId.c_str());
 
@@ -80,9 +80,6 @@ CInputCaptureResource::~CInputCaptureResource() {
         g_pEventLoopManager->removeTimer(m_keyRepeatTimer);
         m_keyRepeatTimer.reset();
     }
-
-    if (m_status == CLIENT_STATUS_ACTIVATED)
-        PROTO::inputCapture->forceRelease();
 
     LOG(Log::INFO, "[input-capture]({}) session destroyed", m_sessionId.c_str());
     PROTO::inputCapture->clearBarriers(m_sessionId);
@@ -167,7 +164,7 @@ static bool isBarrierValid(int x1, int y1, int x2, int y2) {
 }
 
 void CInputCaptureResource::onAddBarrier(uint32_t zoneSet, uint32_t id, uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2) {
-    static auto PENFORCEBARRIERS = CConfigValue<Hyprlang::INT>("input-capture:enforce_barriers");
+    static auto PENFORCEBARRIERS = CConfigValue<Config::INTEGER>("input-capture:enforce_barriers");
     // Protocol coordinates are transported as uint32_t. Negative global-space
     // coordinates are encoded via two's complement and must be reinterpreted.
     const int32_t sx1 = static_cast<int32_t>(x1);
@@ -358,7 +355,11 @@ void CInputCaptureProtocol::onCreateSession(CHyprlandInputCaptureManagerV1* pMgr
 }
 
 void CInputCaptureProtocol::destroyResource(CInputCaptureResource* resource) {
-    std::erase_if(m_Sessions, [resource](const auto& other) { return other->m_sessionId == resource->m_sessionId; });
+    //`active` holds a strong ref, so the erase alone would not destroy the session
+    if (active && active.get() == resource)
+        forceRelease();
+
+    std::erase_if(m_Sessions, [resource](const auto& other) { return other.get() == resource; });
 }
 
 bool CInputCaptureProtocol::isCaptured() {

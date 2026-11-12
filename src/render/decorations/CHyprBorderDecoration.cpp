@@ -1,4 +1,5 @@
 #include "CHyprBorderDecoration.hpp"
+#include "BorderGeometry.hpp"
 #include "../../desktop/view/window/WindowGroupMembership.hpp"
 #include "../../desktop/view/window/WindowPresentation.hpp"
 #include "../../Compositor.hpp"
@@ -10,6 +11,7 @@
 #include "../../managers/fullscreen/FullscreenController.hpp"
 #include "../pass/BorderPassElement.hpp"
 #include "../Renderer.hpp"
+#include "../WindowRenderPresentation.hpp"
 #include "../../state/MonitorState.hpp"
 
 CHyprBorderDecoration::CHyprBorderDecoration(PHLWINDOW pWindow) :
@@ -18,11 +20,8 @@ CHyprBorderDecoration::CHyprBorderDecoration(PHLWINDOW pWindow) :
 }
 
 SDecorationPositioningInfo CHyprBorderDecoration::getPositioningInfo() {
-    const auto BORDERSIZE = borderSize();
+    const auto BORDERSIZE = borderExtent();
     m_extents             = {{BORDERSIZE, BORDERSIZE}, {BORDERSIZE, BORDERSIZE}};
-
-    if (doesntWantBorders())
-        m_extents = {{}, {}};
 
     SDecorationPositioningInfo info;
     info.priority       = 10000;
@@ -40,26 +39,24 @@ void CHyprBorderDecoration::onPositioningReply(const SDecorationPositioningReply
 }
 
 CBox CHyprBorderDecoration::assignedBoxGlobal() {
+    return assignedBoxGlobal(m_window->presentation().renderPresentation());
+}
+
+CBox CHyprBorderDecoration::assignedBoxGlobal(const Render::SWindowRenderPresentation& presentation) {
     CBox box = m_assignedGeometry;
     box.translate(g_pDecorationPositioner->getEdgeDefinedPoint(DECORATION_EDGE_BOTTOM | DECORATION_EDGE_LEFT | DECORATION_EDGE_RIGHT | DECORATION_EDGE_TOP, m_window));
 
-    const auto PWORKSPACE = m_window->m_workspace;
-
-    if (!PWORKSPACE)
-        return box;
-
-    const auto WORKSPACEOFFSET = PWORKSPACE && !(m_window->m_state & Desktop::View::WINDOW_STATE_PINNED) ? PWORKSPACE->m_renderOffset->value() : Vector2D();
-    return box.translate(WORKSPACEOFFSET);
+    return box.translate(presentation.workspaceOffset);
 }
 
-void CHyprBorderDecoration::draw(PHLMONITOR pMonitor, float const& a) {
+void CHyprBorderDecoration::draw(Render::CRenderContext& ctx, PHLMONITOR pMonitor, float const& a, const Render::SWindowRenderPresentation& presentation) {
     if (doesntWantBorders())
         return;
 
     if (m_assignedGeometry.width < m_extents.topLeft.x + 1 || m_assignedGeometry.height < m_extents.topLeft.y + 1)
         return;
 
-    CBox windowBox = assignedBoxGlobal().translate(-pMonitor->m_position + m_window->presentation().floatingOffset()).expand(-borderSize()).scale(pMonitor->m_scale).round();
+    CBox windowBox = assignedBoxGlobal(presentation).translate(-pMonitor->m_position + presentation.floatingOffset).expand(-m_extents.topLeft.x).scale(pMonitor->m_scale).round();
 
     if (windowBox.width < 1 || windowBox.height < 1)
         return;
@@ -89,7 +86,7 @@ void CHyprBorderDecoration::draw(PHLMONITOR pMonitor, float const& a) {
         data.lerp     = GRADIENT.progress;
     }
 
-    g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(data));
+    g_pHyprRenderer->addPassElement(ctx, makeUnique<CBorderPassElement>(data));
 }
 
 eDecorationType CHyprBorderDecoration::getDecorationType() {
@@ -97,15 +94,12 @@ eDecorationType CHyprBorderDecoration::getDecorationType() {
 }
 
 void CHyprBorderDecoration::updateWindow(PHLWINDOW) {
-    auto borderSize = this->borderSize();
+    const auto EXTENT = borderExtent();
 
-    if (borderSize == m_lastBorderSize)
+    if (EXTENT == m_lastBorderExtent)
         return;
 
-    if (borderSize <= 0 && m_lastBorderSize <= 0)
-        return;
-
-    m_lastBorderSize = borderSize;
+    m_lastBorderExtent = EXTENT;
 
     g_pDecorationPositioner->repositionDeco(this);
 }
@@ -231,6 +225,14 @@ void CHyprBorderDecoration::invalidateBorderSize() {
     m_borderSizeCacheDirty = true;
 }
 
-bool CHyprBorderDecoration::doesntWantBorders() {
+double CHyprBorderDecoration::borderExtent() const {
+    if (doesntWantBorders())
+        return 0;
+
+    const auto PMONITOR = m_window->m_monitor.lock();
+    return Render::borderExtentInLogical(borderSize(), PMONITOR ? PMONITOR->m_scale : 1.F);
+}
+
+bool CHyprBorderDecoration::doesntWantBorders() const {
     return m_window->backend().traits().suggestsNoBorder || borderSize() == 0 || !m_window->m_ruleApplicator->decorate().valueOrDefault();
 }

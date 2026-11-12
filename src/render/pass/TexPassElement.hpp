@@ -1,5 +1,6 @@
 #pragma once
 #include "PassElement.hpp"
+#include "../WindowRenderPresentation.hpp"
 #include <optional>
 
 class CWLSurfaceResource;
@@ -33,55 +34,56 @@ struct SMotionBlurData {
 class CTexPassElement : public IPassElement {
   public:
     struct SRenderData {
-        SP<Render::ITexture>   tex;
-        CBox                   box;
-        float                  a        = 1.F;
-        float                  blurA    = 1.F;
-        float                  overallA = 1.F;
-        CRegion                damage;
-        bool                   useProvidedDamage = false;
-        int                    round             = 0;
-        float                  roundingPower     = 2.0f;
-        CBox                   clipBox;
-        bool                   blur           = false;
-        bool                   forceBlurBlend = false;
-        std::optional<CBox>    blurPatternBox;
-        std::optional<float>   ignoreAlpha;
-        std::optional<bool>    blockBlurOptimization;
-        std::optional<bool>    liveBlurOverride;
-        bool                   cmBackToSRGB = false;
+        SP<Render::ITexture>              tex;
+        CBox                              box;
+        float                             a        = 1.F;
+        float                             blurA    = 1.F;
+        float                             overallA = 1.F;
+        CRegion                           damage;
+        bool                              useProvidedDamage = false;
+        int                               round             = 0;
+        float                             roundingPower     = 2.0f;
+        CBox                              clipBox;
+        bool                              blur           = false;
+        bool                              forceBlurBlend = false;
+        std::optional<CBox>               blurPatternBox;
+        std::optional<float>              ignoreAlpha;
+        std::optional<bool>               blockBlurOptimization;
+        std::optional<bool>               liveBlurOverride;
+        bool                              cmBackToSRGB = false;
 
-        bool                   discardActive = false;
-        bool                   allowCustomUV = false;
-        SP<CWLSurfaceResource> surface       = nullptr;
+        bool                              discardActive = false;
+        bool                              allowCustomUV = false;
+        SP<CWLSurfaceResource>            surface       = nullptr;
 
-        uint8_t                wrapX = WRAP_CLAMP_TO_EDGE;
-        uint8_t                wrapY = WRAP_CLAMP_TO_EDGE;
+        uint8_t                           wrapX = WRAP_CLAMP_TO_EDGE;
+        uint8_t                           wrapY = WRAP_CLAMP_TO_EDGE;
 
-        uint8_t                discardMode    = DISCARD_OPAQUE;
-        float                  discardOpacity = 0.f;
+        uint8_t                           discardMode    = DISCARD_OPAQUE;
+        float                             discardOpacity = 0.f;
 
-        CRegion                clipRegion;
-        PHLLSREF               currentLS;
-        PHLWINDOWREF           blurOwner;
+        CRegion                           clipRegion;
+        PHLLSREF                          currentLS;
+        PHLWINDOWREF                      blurOwner;
 
-        SP<Render::ITexture>   blurredBG;
-        SP<Render::ITexture>   blurAlphaMatte;
-        SMotionBlurData        motionBlur;
-        bool                   blurShapeInvalid = false;
+        SP<Render::ITexture>              blurredBG;
+        SP<Render::ITexture>              blurAlphaMatte;
+        SMotionBlurData                   motionBlur;
+        bool                              blurShapeInvalid = false;
+        Render::SWindowRenderPresentation workspacePresentation;
     };
 
     CTexPassElement(const SRenderData& data);
     CTexPassElement(SRenderData&& data);
     virtual ~CTexPassElement() = default;
 
-    virtual bool                needsLiveBlur();
-    virtual bool                needsPrecomputeBlur();
-    virtual std::optional<CBox> boundingBox();
-    virtual CRegion             opaqueRegion();
-    virtual void                discard();
+    virtual bool                needsLiveBlur(Render::CRenderContext& ctx);
+    virtual bool                needsPrecomputeBlur(Render::CRenderContext& ctx);
+    virtual std::optional<CBox> boundingBox(Render::CRenderContext& ctx);
+    virtual CRegion             opaqueRegion(Render::CRenderContext& ctx);
+    virtual void                discard(Render::CRenderContext& ctx);
 
-    bool                        usesLiveBlur();
+    bool                        usesLiveBlur(Render::CRenderContext& ctx);
 
     virtual const char*         passName() {
         return "CTexPassElement";
@@ -92,7 +94,4 @@ class CTexPassElement : public IPassElement {
     };
 
     SRenderData m_data;
-
-  private:
-    std::optional<bool> m_usesLiveBlur;
 };

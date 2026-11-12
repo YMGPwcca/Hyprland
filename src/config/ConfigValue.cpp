@@ -3,18 +3,15 @@
 
 #include <algorithm>
 
-void local__configValuePopulate(void* const** p, void* const** hlangp, std::type_index* ti, const std::string& val) {
+void local__configValuePopulate(void* const** p, const bool** setByUser, std::type_index* ti, const std::string& val) {
     const auto BIGP = Config::mgr()->getConfigValue(val);
 
     RASSERT(BIGP.dataptr, "Something went really fucking wrong with config values");
 
-    *ti = std::type_index(*BIGP.type);
+    *ti        = std::type_index(*BIGP.type);
+    *setByUser = BIGP.setByUser;
 
-    if (std::type_index(*BIGP.type) == typeid(void*) || std::type_index(*BIGP.type) == typeid(const char*)) {
-        // this is a special, cursed case. ew.
-        *hlangp = BIGP.dataptr;
-    } else
-        *p = BIGP.dataptr;
+    *p = BIGP.dataptr;
 }
 
 std::type_index local__configValueTypeIdx(const std::string& val) {
@@ -32,10 +29,9 @@ CConfigValueBase::~CConfigValueBase() {
 
 void CConfigValueBase::populateFromName() {
     m_p         = nullptr;
-    m_hlangp    = nullptr;
     m_typeIndex = typeid(void);
     if (!m_valueName.empty())
-        local__configValuePopulate(&m_p, &m_hlangp, &m_typeIndex, m_valueName);
+        local__configValuePopulate(&m_p, &m_setByUser, &m_typeIndex, m_valueName);
 }
 
 void CConfigValueBase::bindInternal(const std::string& val) {

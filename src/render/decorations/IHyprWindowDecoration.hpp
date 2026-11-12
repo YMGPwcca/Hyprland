@@ -1,5 +1,10 @@
 #pragma once
 
+namespace Render {
+    class CRenderContext;
+    struct SWindowRenderPresentation;
+}
+
 #include <any>
 #include "../../defines.hpp"
 #include "../../helpers/math/Math.hpp"
@@ -42,7 +47,7 @@ class IHyprWindowDecoration {
 
     virtual void                       onPositioningReply(const SDecorationPositioningReply& reply) = 0;
 
-    virtual void                       draw(PHLMONITOR, float const& a) = 0;
+    virtual void                       draw(Render::CRenderContext& ctx, PHLMONITOR, float const& a, const Render::SWindowRenderPresentation& presentation) = 0;
 
     virtual eDecorationType            getDecorationType() = 0;
 

@@ -10,8 +10,8 @@ class ITouch : public IHID {
   public:
     virtual uint32_t               getCapabilities();
     virtual eHIDType               getType();
-    virtual bool                   isVirtual() = 0;
-    virtual SP<Aquamarine::ITouch> aq()        = 0;
+    virtual bool                   isVirtual() const = 0;
+    virtual SP<Aquamarine::ITouch> aq()              = 0;
 
     struct SDownEvent {
         uint32_t   timeMs  = 0;
@@ -47,4 +47,7 @@ class ITouch : public IHID {
     std::string m_boundOutput = "";
 
     WP<ITouch>  m_self;
+
+  protected:
+    using IHID::IHID;
 };

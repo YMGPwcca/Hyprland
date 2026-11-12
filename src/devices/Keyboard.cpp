@@ -11,7 +11,7 @@ SP<CKeyboard> CKeyboard::create(SP<Aquamarine::IKeyboard> keeb) {
     return pKeeb;
 }
 
-bool CKeyboard::isVirtual() {
+bool CKeyboard::isVirtual() const {
     return false;
 }
 
@@ -19,7 +19,7 @@ SP<Aquamarine::IKeyboard> CKeyboard::aq() {
     return m_keyboard.lock();
 }
 
-CKeyboard::CKeyboard(SP<Aquamarine::IKeyboard> keeb) : m_keyboard(keeb) {
+CKeyboard::CKeyboard(SP<Aquamarine::IKeyboard> keeb) : IKeyboard(keeb ? keeb->getLibinputHandle() : nullptr), m_keyboard(keeb) {
     if (!keeb)
         return;
 

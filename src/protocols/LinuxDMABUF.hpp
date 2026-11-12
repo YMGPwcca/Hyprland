@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <array>
 #include <cstdint>
 #include "WaylandProtocol.hpp"
 #include "wayland.hpp"
@@ -16,7 +17,7 @@ class CWLSurfaceResource;
 
 class CLinuxDMABuffer {
   public:
-    CLinuxDMABuffer(uint32_t id, wl_client* client, Aquamarine::SDMABUFAttrs attrs);
+    CLinuxDMABuffer(uint32_t id, wl_client* client, const Aquamarine::SDMABUFAttrs& attrs, std::array<Hyprutils::OS::CFileDescriptor, 4> fds);
     ~CLinuxDMABuffer();
 
     bool good();
@@ -52,7 +53,8 @@ class CDMABUFFormatTable {
     ~CDMABUFFormatTable() = default;
 
     Hyprutils::OS::CFileDescriptor                        m_tableFD;
-    size_t                                                m_tableSize = 0;
+    size_t                                                m_tableSize         = 0;
+    bool                                                  m_skipNonKMSFormats = false;
     SDMABUFTranche                                        m_rendererTranche;
     std::vector<std::pair<PHLMONITORREF, SDMABUFTranche>> m_monitorTranches;
 };
@@ -62,18 +64,20 @@ class CLinuxDMABUFParamsResource {
     CLinuxDMABUFParamsResource(UP<CZwpLinuxBufferParamsV1>&& resource_);
     ~CLinuxDMABUFParamsResource() = default;
 
-    bool                         good();
-    void                         create(uint32_t id); // 0 means not immed
+    bool                     good();
+    void                     create(uint32_t id); // 0 means not immed
 
-    SP<Aquamarine::SDMABUFAttrs> m_attrs;
-    WP<CLinuxDMABuffer>          m_createdBuffer;
-    bool                         m_used = false;
+    Aquamarine::SDMABUFAttrs m_attrs{};
+    WP<CLinuxDMABuffer>      m_createdBuffer;
+    bool                     m_used = false;
 
   private:
     UP<CZwpLinuxBufferParamsV1> m_resource;
+    // m_attrs contains borrowed descriptors, owned here until buffer construction.
+    std::array<Hyprutils::OS::CFileDescriptor, 4> m_fds;
 
-    bool                        verify();
-    bool                        commence();
+    bool                                          verify();
+    bool                                          commence();
 };
 
 class CLinuxDMABUFFeedbackResource {
@@ -83,6 +87,7 @@ class CLinuxDMABUFFeedbackResource {
 
     bool                   good();
     void                   sendDefaultFeedback();
+    void                   sendScanoutFeedback(PHLMONITOR monitor);
     void                   sendTranche(SDMABUFTranche& tranche);
 
     SP<CWLSurfaceResource> m_surface; // optional, for surface feedbacks
@@ -132,11 +137,13 @@ class CLinuxDMABufV1Protocol : public IWaylandProtocol {
     UP<CDMABUFFormatTable>                        m_formatTable;
     dev_t                                         m_mainDevice;
     Hyprutils::OS::CFileDescriptor                m_mainDeviceFD;
+    CHyprSignalListener                           m_configRefreshed;
 
     friend class CLinuxDMABUFResource;
     friend class CLinuxDMABUFFeedbackResource;
     friend class CLinuxDMABUFParamsResource;
     friend class CLinuxDMABuffer;
+    friend class CDMABUFFeedbackTest;
 };
 
 namespace PROTO {

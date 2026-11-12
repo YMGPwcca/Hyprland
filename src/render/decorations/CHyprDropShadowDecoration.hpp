@@ -16,23 +16,23 @@ class CHyprDropShadowDecoration : public IHyprWindowDecoration {
     CHyprDropShadowDecoration(PHLWINDOW);
     virtual ~CHyprDropShadowDecoration() = default;
 
-    virtual SDecorationPositioningInfo getPositioningInfo();
+    virtual SDecorationPositioningInfo getPositioningInfo() override;
 
-    virtual void                       onPositioningReply(const SDecorationPositioningReply& reply);
+    virtual void                       onPositioningReply(const SDecorationPositioningReply& reply) override;
 
-    virtual void                       draw(PHLMONITOR, float const& a);
+    virtual void                       draw(Render::CRenderContext& ctx, PHLMONITOR, float const& a, const Render::SWindowRenderPresentation& presentation) override;
 
-    virtual eDecorationType            getDecorationType();
+    virtual eDecorationType            getDecorationType() override;
 
-    virtual void                       updateWindow(PHLWINDOW);
+    virtual void                       updateWindow(PHLWINDOW) override;
 
-    virtual void                       damageEntire();
+    virtual void                       damageEntire() override;
 
-    virtual eDecorationLayer           getDecorationLayer();
+    virtual eDecorationLayer           getDecorationLayer() override;
 
-    virtual uint64_t                   getDecorationFlags();
+    virtual uint64_t                   getDecorationFlags() override;
 
-    virtual std::string                getDisplayName();
+    virtual std::string                getDisplayName() override;
 
     virtual void                       initializeAnimations() override;
     virtual void                       updateState() override;
@@ -40,11 +40,11 @@ class CHyprDropShadowDecoration : public IHyprWindowDecoration {
     virtual void                       onWindowFocus() override;
 
     bool                               canRender(PHLMONITOR);
-    SShadowRenderData                  getRenderData(PHLMONITOR, float const& a);
-    void                               reposition();
+    SShadowRenderData                  getRenderData(Render::CRenderContext& ctx, PHLMONITOR, float const& a, const Render::SWindowRenderPresentation& presentation);
+    void                               reposition(Render::CRenderContext& ctx);
 
     // TODO remove
-    void render(PHLMONITOR, float const& a);
+    void render(Render::CRenderContext& ctx, PHLMONITOR, float const& a, const Render::SWindowRenderPresentation& presentation);
 
   private:
     SBoxExtents                 m_extents;
@@ -57,9 +57,10 @@ class CHyprDropShadowDecoration : public IHyprWindowDecoration {
     Vector2D                    m_lastWindowPos;
     Vector2D                    m_lastWindowSize;
 
-    void                        drawShadowInternal(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad, float a);
-    void drawShadowInternal(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2,
-                            float lerp, float a);
+    void drawShadowInternal(Render::CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad, float a,
+                            const Render::SWindowRenderPresentation& presentation);
+    void drawShadowInternal(Render::CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1,
+                            const Config::CGradientValueData& grad2, float lerp, float a, const Render::SWindowRenderPresentation& presentation);
 
     CBox m_lastWindowBox          = {0};
     CBox m_lastWindowBoxWithDecos = {0};

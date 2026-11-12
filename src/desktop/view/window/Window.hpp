@@ -13,7 +13,7 @@
 #include "../../DesktopTypes.hpp"
 #include "../../types/MultiAnimatedVariable.hpp"
 #include "../WLSurface.hpp"
-#include "../../Workspace.hpp"
+#include "../../../workspace/HLWorkspace.hpp"
 #include "../../rule/windowRule/WindowRuleApplicator.hpp"
 #include "../../../protocols/types/ContentType.hpp"
 #include "../types/GeometricMovableAnimated.hpp"
@@ -23,13 +23,23 @@
 #include "../surfaceTree/SubsurfaceOwner.hpp"
 #include "WindowBackend.hpp"
 
+class CMonitorWindowTransactionTest;
+
 namespace Config {
     class CWorkspaceRule;
+}
+
+namespace Render {
+    struct SWindowRenderPresentation;
 }
 
 namespace Layout {
     class ITarget;
     class CWindowTarget;
+}
+
+namespace Monitor {
+    class CMonitorWindowTransaction;
 }
 
 namespace Desktop {
@@ -44,6 +54,7 @@ namespace Desktop::View {
     class CWindowGroupMembership;
     class CWindowMetadata;
     class CWindowPresentation;
+    class CWindowStateEventTracker;
     class CWindowSwallowController;
 
     enum eWindowUpdateSource : uint8_t {
@@ -101,8 +112,10 @@ namespace Desktop::View {
     };
 
     struct SInitialWorkspaceToken {
-        PHLWINDOWREF primaryOwner;
-        std::string  workspace;
+        PHLWINDOWREF              primaryOwner;
+        Workspace::WorkspaceID    workspaceID;
+        std::string               workspaceAddress;
+        Workspace::eWorkspaceType workspaceType = Workspace::eWorkspaceType::NORMAL;
     };
 
     struct SClientFullscreenRequest {
@@ -139,9 +152,19 @@ namespace Desktop::View {
         const CWindowFullscreenPolicy&                            fullscreenPolicy() const;
         CWindowGroupMembership&                                   grouping();
         const CWindowGroupMembership&                             grouping() const;
+        CWindowStateEventTracker&                                 stateTracker();
 
         virtual eViewType                                         type() const override;
         virtual bool                                              mapped() const override;
+        Vector2D                                                  position(eGeometricValueType type) const override;
+        Vector2D                                                  size(eGeometricValueType type) const override;
+        CBox                                                      geometricBox(eGeometricValueType type) const override;
+        void                                                      move(const Vector2D& position) override;
+        void                                                      resize(const Vector2D& size) override;
+        void                                                      setBox(const CBox& box) override;
+        void                                                      finishAnimation() override;
+        bool                                                      canStageGeometry() const;
+        void                                                      flushPendingGeometry();
         virtual bool                                              focusAvailable() const override;
         virtual std::optional<CBox>                               logicalBox() const override;
         virtual bool                                              desktopComponent() const override;
@@ -149,6 +172,7 @@ namespace Desktop::View {
         virtual Types::CMultiAVarContainer<float, uint8_t>&       alpha() override;
         virtual const Types::CMultiAVarContainer<float, uint8_t>& alpha() const override;
         virtual std::optional<uint8_t>                            alphaGenericToKey(eAlphaModifiableProp p) override;
+        virtual bool                                              cantLockCursor() const override;
 
         struct {
             CSignalT<> destroy;
@@ -195,11 +219,13 @@ namespace Desktop::View {
         void                       updateToplevel();
         void                       updateSurfaceScaleTransformDetails(bool force = false);
         void                       moveToWorkspace(PHLWORKSPACE);
+        void                       syncInitialWorkspaceToken(PHLWORKSPACE);
         void                       onUnmap();
         void                       onMap();
         void                       setHidden(bool hidden);
         bool                       isHidden() const;
         bool                       shouldBlur() const;
+        bool                       shouldBlur(const Render::SWindowRenderPresentation& presentation) const;
         bool                       isAllowedOverFullscreen() const;
         bool                       isBlockedByFullscreen() const;
         bool                       isFadingOutUnderFullscreen() const;
@@ -209,10 +235,11 @@ namespace Desktop::View {
         Vector2D                   middle();
         bool                       canBeTorn();
         void                       setSuspended(bool suspend);
-        WORKSPACEID                workspaceID();
         MONITORID                  monitorID();
         bool                       onSpecialWorkspace();
+        const std::string&         workspaceAddress() const;
         void                       activate(bool force = false);
+        void                       markUrgent();
         bool                       clampWindowSize(const std::optional<Vector2D> minSize, const std::optional<Vector2D> maxSize);
         float                      getScrollMouse();
         float                      getScrollTouchpad();
@@ -240,7 +267,6 @@ namespace Desktop::View {
         SP<Layout::ITarget> layoutTarget();
         SP<Layout::ITarget> layoutTarget() const;
         bool                isFloating() const;
-        bool                cantLockCursor() const;
         void                sendClose();
         void                requestClientFullscreen(const SClientFullscreenRequest& request);
 
@@ -254,6 +280,24 @@ namespace Desktop::View {
         PHLWINDOWREF m_self;
 
       private:
+        struct SPendingGeometry {
+            CBox box;
+            bool warp  = false;
+            bool ready = false;
+        };
+
+        void                                   stageGeometry(const CBox& box);
+        bool                                   pendingGeometryResizes() const;
+        void                                   applyPendingGeometry();
+        void                                   discardPendingGeometry();
+        void                                   cancelPendingGeometry();
+        std::optional<SPendingGeometry>        m_pendingGeometry;
+        WP<Monitor::CMonitorWindowTransaction> m_geometryTransaction;
+        bool                                   m_geometryTransactionsBlocked = false;
+
+        friend class Monitor::CMonitorWindowTransaction;
+        friend class ::CMonitorWindowTransactionTest;
+
         void         initialize();
         void         attachBackendListeners();
         void         mapWindow();
@@ -271,10 +315,11 @@ namespace Desktop::View {
         void         unmanagedSetGeometry(const CBox& box);
         virtual void onInputBlockStateUpdated(bool blocked) override;
         // For hidden windows and stuff
-        bool        m_hidden        = false;
-        bool        m_suspended     = false;
-        bool        m_isMapped      = false;
-        WORKSPACEID m_lastWorkspace = WORKSPACE_INVALID;
+        bool        m_hidden    = false;
+        bool        m_suspended = false;
+        bool        m_isMapped  = false;
+        std::string m_lastWorkspaceAddress;
+        bool        m_lastWorkspaceSpecial = false;
 
         struct {
             bool activate            = false;
@@ -290,6 +335,7 @@ namespace Desktop::View {
         UP<CWindowMetadata>          m_metadata;
         UP<CWindowPresentation>      m_presentation;
         UP<CWindowEffectsController> m_effects;
+        UP<CWindowStateEventTracker> m_stateTracker;
         SP<Layout::CWindowTarget>    m_target;
         struct {
             CHyprSignalListener map;
@@ -363,7 +409,7 @@ struct std::formatter<PHLWINDOW, CharT> : std::formatter<CharT> {
         std::format_to(out, "[");
         std::format_to(out, "Window {:x}: title: \"{}\"", rc<uintptr_t>(w.get()), w->metadata().title());
         if (formatWorkspace)
-            std::format_to(out, ", workspace: {}", w->m_workspace ? w->workspaceID() : WORKSPACE_INVALID);
+            std::format_to(out, ", workspace: {}", w->m_workspace ? w->m_workspace->addressableName() : "none");
         if (formatMonitor)
             std::format_to(out, ", monitor: {}", w->monitorID());
         if (formatClass)

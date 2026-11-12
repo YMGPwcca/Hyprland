@@ -3,6 +3,10 @@
 #include "Renderer.hpp"
 #include "render/ElementRenderer.hpp"
 
+namespace Render {
+    struct SWindowRenderPresentation;
+}
+
 namespace Render::GL {
     class IGLBlurProvider;
 
@@ -12,7 +16,8 @@ namespace Render::GL {
         ~CHyprGLRenderer();
 
         eType                   type() override;
-        void                    endRender(const std::function<void()>& renderingDoneCallback = {}) override;
+        SRenderResult           endRender(const std::function<void()>& renderingDoneCallback = {}) override;
+        void                    abortRender() override;
         UP<ISyncFDManager>      createSyncFDManager() override;
         SP<ITexture>            createStencilTexture(const int width, const int height) override;
         SP<ITexture>            createTexture(bool opaque = false) override;
@@ -28,17 +33,19 @@ namespace Render::GL {
         SP<IFramebuffer>        createFB(const std::string& name = "") override;
         void                    disableScissor() override;
         void                    blend(bool enabled) override;
-        void                    drawShadow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) override;
-        void drawShadow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2, float lerp,
-                        float a) override;
+        void                    drawShadow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a,
+                                           const Render::SWindowRenderPresentation& presentation) override;
+        void                    drawShadow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1,
+                                           const Config::CGradientValueData& grad2, float lerp, float a, const Render::SWindowRenderPresentation& presentation) override;
 
-        void drawGlow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) override;
-        void drawGlow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2, float lerp,
-                      float a) override;
-        SP<IFramebuffer>     blurFramebuffer(SP<IFramebuffer> source, float strength, const CRegion& originalDamage, const Render::SBlurContext& context = {}) override;
+        void                 drawGlow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) override;
+        void                 drawGlow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1,
+                                      const Config::CGradientValueData& grad2, float lerp, float a) override;
+        SP<IFramebuffer>     blurFramebuffer(CRenderContext& ctx, SP<IFramebuffer> source, float strength, const CRegion& originalDamage,
+                                             const Render::SBlurContext& context = {}) override;
         void                 refreshBlurProvider() override;
         void                 expandBlurDamage(CRegion& damage, float multiplier = 1.F) const override;
-        bool                 blurProviderIsAnimated() const override;
+        bool                 blurProviderIsAnimated(CRenderContext& ctx) const override;
         bool                 blurProviderRequiresLiveBlur() const override;
         void                 setViewport(int x, int y, int width, int height) override;
         bool                 reloadShaders(const std::string& path = "") override;
@@ -48,19 +55,21 @@ namespace Render::GL {
 
       private:
         void                 preRender(PHLMONITOR pMonitor);
-        void                 renderOffToMain(SP<IFramebuffer> off) override;
+        void                 renderOffToMain(CRenderContext& ctx, SP<IFramebuffer> off) override;
         SP<IRenderbuffer>    getOrCreateRenderbufferInternal(SP<Aquamarine::IBuffer> buffer, uint32_t fmt) override;
-        bool                 beginRenderInternal(PHLMONITOR pMonitor, CRegion& damage, bool simple = false) override;
-        bool                 beginFullFakeRenderInternal(PHLMONITOR pMonitor, CRegion& damage, SP<IFramebuffer> fb, bool simple = false) override;
+        bool                 beginRenderInternal(CRenderContext& ctx, PHLMONITOR pMonitor, CRegion& damage, bool simple = false) override;
+        bool                 beginFullFakeRenderInternal(CRenderContext& ctx, PHLMONITOR pMonitor, CRegion& damage, SP<IFramebuffer> fb, bool simple = false) override;
         void                 initRender() override;
-        bool                 initRenderBuffer(SP<Aquamarine::IBuffer> buffer, uint32_t fmt) override;
+        bool                 initRenderBuffer(CRenderContext& ctx, SP<Aquamarine::IBuffer> buffer, uint32_t fmt) override;
 
         SP<ITexture>         getBlurTexture(PHLMONITORREF pMonitor) override;
 
-        SP<IRenderbuffer>    m_currentRenderbuffer;
         UP<IElementRenderer> m_elementRenderer;
         UP<IGLBlurProvider>  m_blur;
         CHyprSignalListener  m_preRenderListener;
+
+        // FULL_FAKE and aborted draws share this backend's EGL command stream.
+        std::vector<SSurfaceBufferUse> m_pendingBufferUses;
 
         friend class CHyprOpenGLImpl;
     };

@@ -1,4 +1,5 @@
 #include "ScrollingAlgorithm.hpp"
+#include "../../../../helpers/MiscFunctions.hpp"
 #include "../../../../desktop/view/window/WindowGroupMembership.hpp"
 #include "../../../../desktop/view/window/WindowPresentation.hpp"
 #include "ScrollTapeController.hpp"
@@ -454,7 +455,11 @@ void SScrollingData::recalculate(bool forceInstant) {
     // If there is a default covering fullscreen window (tiled or floating)
     if (const auto FULLSCREEN_WINDOW = Fullscreen::controller()->getFullscreenWindow(WORKSPACE, true);
         FULLSCREEN_WINDOW && !Fullscreen::controller()->layoutManagedFS(FULLSCREEN_WINDOW)) {
+
+        // This will function the same way as m_defaultFullscreenHandler's setNoMembersAboveFullscreen() function call
         algorithm->m_scrollingFullscreenHandler->setNoMembersAboveFullscreen();
+        // This will sync the size of the FS window
+        algorithm->m_defaultFullscreenHandler->syncTargetSizeAndPosition();
         return;
     }
 
@@ -467,15 +472,13 @@ void SScrollingData::recalculate(bool forceInstant) {
         CBox       visual        = logical;
         const bool PRIMARY_HORIZ = controller->isPrimaryHorizontal();
 
-        const bool COL_NOT_LEFT      = controller->isReversed() ? colIdx + 1 < columns.size() : colIdx > 0;
-        const bool COL_NOT_RIGHT     = controller->isReversed() ? colIdx > 0 : colIdx + 1 < columns.size();
         const bool TARGET_NOT_TOP    = controller->isReversed() ? targetIdx + 1 < columns[colIdx]->targetDatas.size() : targetIdx > 0;
         const bool TARGET_NOT_BOTTOM = controller->isReversed() ? targetIdx > 0 : targetIdx + 1 < columns[colIdx]->targetDatas.size();
 
-        const bool GAP_LEFT   = PRIMARY_HORIZ ? COL_NOT_LEFT : TARGET_NOT_TOP;
-        const bool GAP_RIGHT  = PRIMARY_HORIZ ? COL_NOT_RIGHT : TARGET_NOT_BOTTOM;
-        const bool GAP_TOP    = PRIMARY_HORIZ ? TARGET_NOT_TOP : COL_NOT_LEFT;
-        const bool GAP_BOTTOM = PRIMARY_HORIZ ? TARGET_NOT_BOTTOM : COL_NOT_RIGHT;
+        const bool GAP_LEFT   = PRIMARY_HORIZ || TARGET_NOT_TOP;
+        const bool GAP_RIGHT  = PRIMARY_HORIZ || TARGET_NOT_BOTTOM;
+        const bool GAP_TOP    = !PRIMARY_HORIZ || TARGET_NOT_TOP;
+        const bool GAP_BOTTOM = !PRIMARY_HORIZ || TARGET_NOT_BOTTOM;
 
         const auto GAPOFFSETTOPLEFT     = Vector2D(sc<double>(GAP_LEFT ? GAPSIN.m_left : 0), sc<double>(GAP_TOP ? GAPSIN.m_top : 0));
         const auto GAPOFFSETBOTTOMRIGHT = Vector2D(sc<double>(GAP_RIGHT ? GAPSIN.m_right : 0), sc<double>(GAP_BOTTOM ? GAPSIN.m_bottom : 0));
@@ -629,8 +632,9 @@ CScrollingAlgorithm::CScrollingAlgorithm() : m_scrollingFullscreenHandler(makeUn
     m_mouseButtonCallback = Event::bus()->m_events.input.mouse.button.listen([this](IPointer::SButtonEvent e, Event::SCallbackInfo&) {
         static const auto PFOLLOW_FOCUS = CConfigValue<Config::INTEGER>("scrolling:follow_focus");
 
+        // click-down shouldn't cause viewport moves
         if (*PFOLLOW_FOCUS && e.state == WL_POINTER_BUTTON_STATE_RELEASED && Desktop::focusState()->window())
-            focusOnInput(Desktop::focusState()->window()->layoutTarget(), INPUT_MODE_CLICK);
+            focusOnInput(Desktop::focusState()->window()->layoutTarget(), (*PFOLLOW_FOCUS == 1) ? INPUT_MODE_CLICK : INPUT_MODE_SOFT);
     });
 
     m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW pWindow, Desktop::eFocusReason reason) {
@@ -1132,7 +1136,7 @@ void CScrollingAlgorithm::moveTargetTo(SP<ITarget> t, Math::eDirection dir, bool
 
         const auto MONINDIR = State::monitorState()->query().relativeTo(m_parent->space()->workspace()->m_monitor.lock()).inDirection(dir).run();
         if (MONINDIR && MONINDIR != m_parent->space()->workspace()->m_monitor && MONINDIR->m_activeWorkspace) {
-            t->assignToSpace(MONINDIR->m_activeWorkspace->m_space, focalPointForDir(t, dir));
+            t->assignToSpace(MONINDIR->m_activeWorkspace->space(), focalPointForDir(t, dir));
 
             m_scrollingData->recalculate();
 
@@ -1858,6 +1862,10 @@ double CScrollingAlgorithm::normalizedTapeOffset() {
         return 0.0;
 
     return m_scrollingData->controller->getOffset() / primary;
+}
+
+double CScrollingAlgorithm::getScrollingTapeOffset() {
+    return m_scrollingData->controller->getOffset();
 }
 
 std::optional<Vector2D> CScrollingAlgorithm::predictSizeForNewTarget() {

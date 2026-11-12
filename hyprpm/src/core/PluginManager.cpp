@@ -8,14 +8,14 @@
 #include "../helpers/Sys.hpp"
 #include "../helpers/Die.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <filesystem>
-#include <string>
-#include <print>
-#include <fstream>
-#include <algorithm>
 #include <format>
+#include <fstream>
+#include <print>
+#include <string>
 #include <string_view>
 
 #include <sys/types.h>
@@ -47,7 +47,7 @@ static std::string execAndGet(std::string cmd) {
 static std::string getTempRoot() {
     static auto ENV = getenv("XDG_RUNTIME_DIR");
     if (!ENV) {
-        std::cerr << "\nERROR: XDG_RUNTIME_DIR not set!\n";
+        std::println("\nERROR: XDG_RUNTIME_DIR not set!");
         exit(1);
     }
 
@@ -175,10 +175,11 @@ bool CPluginManager::addNewPluginRepo(const std::string& url, const std::string&
         return false;
     }
 
-    std::cout << Colors::GREEN << "✔" << Colors::RESET << Colors::RED << " adding a new plugin repository " << Colors::RESET << "from " << url << "\n  " << Colors::RED
-              << "MAKE SURE" << Colors::RESET << " that you trust the authors. " << Colors::RED << "DO NOT" << Colors::RESET
-              << " install random plugins without verifying the code and author.\n  "
-              << "Are you sure? [Y/n] ";
+    std::println("{}✔{} {} adding a new plugin repository {}from {}\n  {}"
+                 "MAKE SURE{} that you trust the authors. {}DO NOT{} "
+                 "install random plugins without verifying the code and author.\n  "
+                 "Are you sure? [Y/n] ",
+                 Colors::GREEN, Colors::RESET, Colors::RED, Colors::RESET, url, Colors::RED, Colors::RESET, Colors::RED, Colors::RESET);
     std::fflush(stdout);
     std::string input;
     std::getline(std::cin, input);
@@ -397,8 +398,9 @@ bool CPluginManager::removePluginRepo(const SPluginRepoIdentifier& identifier) {
         return false;
     }
 
-    std::cout << Colors::YELLOW << "!" << Colors::RESET << Colors::RED << " removing a plugin repository: " << Colors::RESET << identifier.toString() << "\n  "
-              << "Are you sure? [Y/n] ";
+    std::println("{}!{} {} removing a plugin repository: {} {}\n  "
+                 "Are you sure? [Y/n] ",
+                 Colors::YELLOW, Colors::RESET, Colors::RED, Colors::RESET, identifier.toString());
     std::fflush(stdout);
     std::string input;
     std::getline(std::cin, input);
@@ -506,7 +508,7 @@ bool CPluginManager::updateHeaders(bool force) {
 
     const auto CURRENTHEADERS = headersValid();
 
-    if (!force && (CURRENTHEADERS == HEADERS_OK || CURRENTHEADERS == HEADERS_ABI_MISMATCH)) {
+    if (!force && CURRENTHEADERS == HEADERS_OK) {
         std::println("\n{}", successString("Headers up to date."));
         return true;
     }
@@ -587,10 +589,7 @@ bool CPluginManager::updateHeaders(bool force) {
     if (m_bVerbose)
         progress.printMessageAbove(verboseString("setting PREFIX for cmake to {}", DataState::getHeadersPath()));
 
-    const auto CONFIGURE_CMD =
-        nixDevelopIfNeeded(std::format("cd {} && cmake --no-warn-unused-cli -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_INSTALL_PREFIX:STRING=\"{}\" -S . -B ./build", WORKINGDIR,
-                                       DataState::getHeadersPath()),
-                           HLVER);
+    const auto CONFIGURE_CMD = nixDevelopIfNeeded(std::format("make -C '{}' PREFIX='{}' cmake", WORKINGDIR, DataState::getHeadersPath()), HLVER);
 
     if (!CONFIGURE_CMD) {
         std::println(stderr, "\n{}", failureString("Could not configure hyprland: {}", CONFIGURE_CMD.error()));
@@ -623,14 +622,8 @@ bool CPluginManager::updateHeaders(bool force) {
     progress.m_szCurrentMessage = "Installing sources";
     progress.print();
 
-    std::string cmd = std::format("sed -i -e \"s#PREFIX = /usr/local#PREFIX = {}#\" {}/Makefile", DataState::getHeadersPath(), WORKINGDIR);
-    if (m_bVerbose)
-        progress.printMessageAbove(verboseString("prepare install will run: {}", cmd));
-
-    ret = execAndGet(cmd);
-
-    cmd = std::format("make -C '{}' installheaders && chmod -R 644 '{}' && find '{}' -type d -exec chmod a+x {{}} \\;", WORKINGDIR, DataState::getHeadersPath(),
-                      DataState::getHeadersPath());
+    auto cmd =
+        std::format("make -C '{0}' PREFIX='{1}' installheaders && chmod -R 644 '{1}' && find '{1}' -type d -exec chmod a+x {{}} \\;", WORKINGDIR, DataState::getHeadersPath());
 
     if (m_bVerbose)
         progress.printMessageAbove(verboseString("install will run as sudo: {}", cmd));

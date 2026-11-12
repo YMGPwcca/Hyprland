@@ -1,5 +1,6 @@
 #include "Material.hpp"
 
+#include "../../Context.hpp"
 #include "../../ShaderLoader.hpp"
 
 #include <algorithm>
@@ -7,7 +8,15 @@
 using namespace Render;
 using namespace Render::GL;
 
-bool IGLBlurMaterial::isAnimated() const noexcept {
+SP<ITexture> Render::GL::materialTexture(const SP<IFramebuffer>& framebuffer) {
+    if (!framebuffer || !framebuffer->isAllocated())
+        return nullptr;
+
+    const auto texture = framebuffer->getTexture();
+    return texture && texture->ok() ? texture : nullptr;
+}
+
+bool IGLBlurMaterial::isAnimated(CRenderContext& ctx) const noexcept {
     return false;
 }
 
@@ -19,11 +28,19 @@ float IGLBlurMaterial::sampleRadius() const {
     return 0.F;
 }
 
-void IGLBlurMaterial::prepare(const SBlurMaterialContext&) {
+void IGLBlurMaterial::prepareForFrame(CRenderContext& ctx, const SBlurMaterialContext& context) {
+    // Isolated renders may sample live effects, but must not advance or maintain them.
+    if (ctx.readOnlyEffects())
+        return;
+
+    prepare(ctx, context);
+}
+
+void IGLBlurMaterial::prepare(CRenderContext& ctx, const SBlurMaterialContext&) {
     ;
 }
 
-void IGLBlurMaterial::bindFinish(WP<CShader>, const SBlurMaterialContext&) const {
+void IGLBlurMaterial::bindFinish(CRenderContext& ctx, WP<CShader>, const SBlurMaterialContext&) const {
     ;
 }
 

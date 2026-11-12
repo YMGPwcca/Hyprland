@@ -4,22 +4,23 @@
 #include "../desktop/DesktopTypes.hpp"
 
 namespace Render {
-    struct SRenderData;
+    class CRenderContext;
 }
 
 namespace Monitor {
     class CMonitorZoomController {
       public:
-        bool m_resetCameraState = true;
+        bool         m_resetCameraState = true;
 
-        void pinAnchor(const Vector2D& anchor);
-        void clearAnchor();
+        void         pinAnchor(const Vector2D& anchor);
+        void         clearAnchor();
 
-        void applyZoomTransform(CBox& monbox, const Render::SRenderData& m_renderData);
-        bool shouldDamageEntire(float zoomLevel);
+        void         applyZoomTransform(Render::CRenderContext& ctx, CBox& monbox);
+        bool         shouldDamageEntire(float zoomLevel);
+        static float zoomFactor(float cursorZoom, float startupProgress, bool pointerOnMonitor);
 
       private:
-        void     zoomWithDetachedCamera(CBox& result, const Render::SRenderData& m_renderData);
+        void     zoomWithDetachedCamera(Render::CRenderContext& ctx, CBox& result);
         Vector2D getAnchor(const PHLMONITORREF& monitor);
 
         CBox     m_camera;

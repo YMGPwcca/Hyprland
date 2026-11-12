@@ -1,3 +1,5 @@
+#include "../../../../Compositor.hpp"
+
 #include "../../../../config/shared/monitor/MonitorRuleManager.hpp"
 #include "../../../../render/Renderer.hpp"
 
@@ -29,6 +31,13 @@ CScrollingFullscreenHandler::CScrollingFullscreenHandler(Layout::Tiled::CScrolli
 }
 
 CScrollingFullscreenHandler::~CScrollingFullscreenHandler() {
+
+    // No need for extra cleanup of FS lists when compositor is shutting down anyway
+    if (g_pCompositor->m_isShuttingDown)
+        return;
+
+    // sift through any expired entries in case the following loop fucks us - read CScrollingFullscreenHandler::removeFsTarget()
+    std::erase_if(m_fsTargets, [&](const auto& it) { return !it.first; });
 
     for (auto it = m_fsTargets.begin(); it != m_fsTargets.end();) {
         const auto NEXT = std::next(it); // save next before removeFsTarget invalidates it
@@ -243,7 +252,7 @@ eFullscreenRequestResult CScrollingFullscreenHandler::requestFullscreen(const SF
 
     // Because we use MONBOX for a fullscreen window, we need to offset the fact that it's larger than a 1.F column and thus leave the viewport a few pixels to the right when unFullscreened
     if (request.currentMode == FSMODE_FULLSCREEN)
-        m_scrollingAlgorithm->m_scrollingData->controller->adjustOffset(MONITOR->logicalBox().x - WORKSPACE->m_space->workArea().x);
+        m_scrollingAlgorithm->m_scrollingData->controller->adjustOffset(MONITOR->logicalBox().x - WORKSPACE->space()->workArea().x);
 
     // UnFS target
     setTargetFullscreenModeInternal(TARGET, FSMODE_NONE);
@@ -340,6 +349,8 @@ void CScrollingFullscreenHandler::setNoMembersAboveFullscreen(const std::optiona
                 w->updateFullscreenInputState();
             }
         }
+
+        // Hide the top layer window when fullscreening a window
         for (auto const& ls : Desktop::layerState()->layers()) {
             if (ls->m_monitor != MONITOR)
                 continue;
@@ -368,8 +379,7 @@ void CScrollingFullscreenHandler::setNoMembersAboveFullscreen(const std::optiona
     const auto LAYOUT_TILED_COVERING_FS_WINDOW_TARGET = coveringFsTarget.value_or(getFullscreen(true));
     const auto LAYOUT_TILED_COVERING_FS_WINDOW        = LAYOUT_TILED_COVERING_FS_WINDOW_TARGET ? LAYOUT_TILED_COVERING_FS_WINDOW_TARGET->window() : nullptr;
 
-    const auto LAST_SCROLL_HANDLED_TILED_FS_WINDOW =
-        m_fullscreenWindowHidingState.lastTiledLayoutManagedFsWindow ? m_fullscreenWindowHidingState.lastTiledLayoutManagedFsWindow.lock() : nullptr;
+    const auto LAST_SCROLL_HANDLED_TILED_FS_WINDOW         = m_fullscreenWindowHidingState.lastTiledLayoutManagedFsWindow.lock();
     const auto LAST_SCROLL_HANDLED_TILED_FS_WINDOW_FS_MODE = m_fullscreenWindowHidingState.lastTiledLayoutManagedFsWindowMode;
 
     if (!COVERING_FS_WINDOW && LAYOUT_TILED_COVERING_FS_WINDOW) {
@@ -388,14 +398,13 @@ void CScrollingFullscreenHandler::setNoMembersAboveFullscreen(const std::optiona
         return;
     }
 
-    // Have a defult handled covering FS window
-    if (Fullscreen::controller()->getFullscreenHandlerName(COVERING_FS_WINDOW) != FULLSCREEN_HANDLER_SCROLLING) {
-        setNoMembersAboveFS_layoutUnaware(true);
+    // Have a defult handled Tiled covering FS window
+    if (COVERING_FS_WINDOW && !LAYOUT_TILED_COVERING_FS_WINDOW && !COVERING_FS_WINDOW->isFloating()) {
         return;
     }
 
     // There's only a floating FS window - which is always default handled
-    if (COVERING_FS_WINDOW && !LAYOUT_TILED_COVERING_FS_WINDOW) {
+    if (COVERING_FS_WINDOW && !LAYOUT_TILED_COVERING_FS_WINDOW && COVERING_FS_WINDOW->isFloating()) {
         LOG(Log::WARN, "non-scroll-handled FS window called CScrollingFullscreenHandler::setNoMembersAboveFullscreen(). This is a bug, but is not fatal. Recovering...");
 
         clear_hiddenFloatingWindowsUnderFSWindow();
@@ -427,6 +436,8 @@ void CScrollingFullscreenHandler::setNoMembersAboveFullscreen(const std::optiona
                     w->updateFullscreenInputState();
                 }
             }
+
+            // Hide the top layer window when fullscreening a window
             for (auto const& ls : Desktop::layerState()->layers()) {
                 if (ls->m_monitor == MONITOR)
                     ls->m_flags &= ~Desktop::View::LAYER_FLAG_ABOVE_FULLSCREEN;
@@ -449,67 +460,80 @@ void CScrollingFullscreenHandler::syncFullscreenTargets() {
     m_syncingFullscreenTargets = true;
     Hyprutils::Utils::CScopeGuard guard([this] { m_syncingFullscreenTargets = false; });
 
+    const auto                    removeTargetFromList = [&](auto& it) { it = m_fsTargets.erase(it); };
+
+    const auto                    removeFsTargetAndreturnNextIter = [&](auto& it, const auto& TARGET) {
+        const auto NEXT = std::next(it);
+        removeFsTarget(TARGET, true);
+        return NEXT;
+    };
+
     // to prevent a rehash
     std::vector<std::pair<WP<Layout::ITarget>, SFullscreenMode>> toInsert;
 
     for (auto it = m_fsTargets.begin(); it != m_fsTargets.end();) {
 
-        // Somehow happens sometimes and causes WP<> to segfault
-        if (m_fsTargets.empty())
-            return;
+        const auto TARGET = it->first.lock();
 
-        // Rigorously check if WP<> is valid as WP<> randomly segfaults sometimes without this
-        const auto TARGET = !it->first.expired() && it->first.valid() && it->first ? it->first.lock() : nullptr;
-
+        // expired/invalid entries. We need not perform any post-removal operations on these
         if (!TARGET || !TARGET->window() || TARGET->space() != getSpace() || !m_scrollingAlgorithm->dataFor(TARGET, true)) {
-            // simply erase from list. no need to re-set its prev col width as the TARGET is 'invalid'
-            const auto NEXT = std::next(it);
-            removeFsTarget(TARGET, true);
-            it = NEXT;
+            removeTargetFromList(it);
             continue;
         }
 
         const auto TARGET_FS_MODES = getFullscreenModes(TARGET);
+        const auto TDATA           = m_scrollingAlgorithm->dataFor(TARGET, true);
 
-        if (!isFullscreen(TARGET, std::nullopt, std::nullopt) && TARGET_FS_MODES.client == FSMODE_NONE) {
-            const auto NEXT = std::next(it);
-            removeFsTarget(TARGET, true);
-            it = NEXT;
-            continue;
+        if (!isFullscreen(TARGET, std::nullopt, std::nullopt)) {
+            if (TARGET_FS_MODES.client == FSMODE_NONE) {
+                it = removeFsTargetAndreturnNextIter(it, TARGET);
+                continue;
+            }
+            // If target is no longer intenal FS but still client FS, restore its column width
+            if (it->second.restoreColumnWidth.has_value()) {
+                TDATA->column->setColumnWidth(it->second.restoreColumnWidth.value());
+                it->second.restoreColumnWidth = std::nullopt;
+                continue;
+            }
         }
 
         // This might happen if the target was moved to another col, so we need to unFS it properly
-        if (const auto TARGET_WINDOW = TARGET->window(); TARGET_WINDOW && m_scrollingAlgorithm->dataFor(TARGET, true)->column) {
-            const auto STDATA = m_scrollingAlgorithm->dataFor(TARGET, true);
-            if (STDATA) {
-                const auto COL_DATA = m_scrollingAlgorithm->dataFor(TARGET, true)->column;
-                // use TARGET_FS_MODES.internal != FSMODE_NONE here because isFullscreen() would catch that target isn't alone in col and return false
-                if (COL_DATA && TARGET_FS_MODES.internal != FSMODE_NONE && COL_DATA->targetDatas.size() != 1) {
-                    // Empty the list now so the unFS operation has an updated tracked FS target list it can check
-                    for (const auto& e : toInsert) {
-                        m_fsTargets.emplace(e.first, e.second);
-                    }
-                    toInsert.clear();
-
-                    controller()->setFullscreenMode(TARGET_WINDOW, FSMODE_NONE, std::nullopt, true);
-                    if (getFullscreenModes(TARGET).internal != FSMODE_NONE)
-                        removeFsTarget(TARGET, true);
-                    it = m_fsTargets.begin();
-                    continue;
+        if (const auto TARGET_WINDOW = TARGET->window(); TARGET_WINDOW && TDATA->column) {
+            const auto COL_DATA = m_scrollingAlgorithm->dataFor(TARGET, true)->column;
+            // use TARGET_FS_MODES.internal != FSMODE_NONE here because isFullscreen() would catch that target isn't alone in col and return false
+            if (COL_DATA && TARGET_FS_MODES.internal != FSMODE_NONE && COL_DATA->targetDatas.size() != 1) {
+                // Empty the list now so the unFS operation has an updated tracked FS target list it can check
+                for (const auto& e : toInsert) {
+                    m_fsTargets.emplace(e.first, e.second);
                 }
+                toInsert.clear();
+                controller()->setFullscreenMode(TARGET_WINDOW, FSMODE_NONE, std::nullopt, true);
+                if (getFullscreenModes(TARGET).internal != FSMODE_NONE)
+                    removeFsTarget(TARGET, true);
+                it = m_fsTargets.begin();
+                continue;
             }
         }
 
         // If ITarget's underlying type is CWindowGroupTarget; only store the current window, NOT the whole group
-        if (TARGET->type() == Layout::TARGET_TYPE_GROUP || (TARGET->window()->grouping().group() && TARGET->window()->grouping().group()->current()->windowTarget() != TARGET)) {
+        if (TARGET->type() == Layout::TARGET_TYPE_GROUP) {
             LOG(Log::WARN, "Handler tracked a window group. This should have never happened. Recovering...");
-
+            const SFullscreenMode MODE = SFullscreenMode{.internal = it->second.mode.internal, .client = it->second.mode.client};
+            // gets the current window's target in the window group
             const auto WINDOWTARGET = TARGET->window()->windowTarget();
-            const auto NEXT         = std::next(it);
-            removeFsTarget(TARGET, true);
-            it = NEXT;
-            if (WINDOWTARGET)
-                toInsert.emplace_back(WINDOWTARGET, TARGET_FS_MODES);
+
+            if (!WINDOWTARGET) {
+                removeTargetFromList(it);
+                continue;
+            }
+
+            if (!isFullscreen(WINDOWTARGET) && MODE.client == FSMODE_NONE) {
+                it = removeFsTargetAndreturnNextIter(it, TARGET);
+                continue;
+            }
+            // do post-remove-ops on the window group target as that's what algorithms store as a target, then save only the current window of the group
+            it = removeFsTargetAndreturnNextIter(it, TARGET);
+            toInsert.emplace_back(WINDOWTARGET, MODE);
             continue;
         }
 
@@ -518,7 +542,6 @@ void CScrollingFullscreenHandler::syncFullscreenTargets() {
             ++it;
             continue;
         }
-
         ++it;
     }
 
@@ -528,6 +551,14 @@ void CScrollingFullscreenHandler::syncFullscreenTargets() {
 }
 
 void CScrollingFullscreenHandler::removeFsTarget(SP<Layout::ITarget> target, const bool recursionGuard) {
+
+    // This should not be done because if there are 2 expired elements in the list, this will remove one of them with little guarantee as to which and the caller is preumsably looking forward and getting the next
+    // iterator in the list; which would corrupt the map if that next iter is also nullptr. We let this go through on the offchance that there is Ǝ! expired entries or the erase hits the right expired target but it is
+    // non-deterministic
+    if (!target)
+        Log::logger->log(
+            Log::CRIT,
+            "IFullscreenHandler::removeFsTarget() called with target = nullptr. This is possibly non-deterministic and should NOT happen. This is a bug and should be reported!");
 
     const auto ITR = m_fsTargets.find(target);
 

@@ -28,25 +28,25 @@ class CHyprGroupBarDecoration : public IHyprWindowDecoration {
     CHyprGroupBarDecoration(PHLWINDOW);
     virtual ~CHyprGroupBarDecoration() = default;
 
-    virtual SDecorationPositioningInfo getPositioningInfo();
+    virtual SDecorationPositioningInfo getPositioningInfo() override;
 
-    virtual void                       onPositioningReply(const SDecorationPositioningReply& reply);
+    virtual void                       onPositioningReply(const SDecorationPositioningReply& reply) override;
 
-    virtual void                       draw(PHLMONITOR, float const& a);
+    virtual void                       draw(Render::CRenderContext& ctx, PHLMONITOR, float const& a, const Render::SWindowRenderPresentation& presentation) override;
 
-    virtual eDecorationType            getDecorationType();
+    virtual eDecorationType            getDecorationType() override;
 
-    virtual void                       updateWindow(PHLWINDOW);
+    virtual void                       updateWindow(PHLWINDOW) override;
 
-    virtual void                       damageEntire();
+    virtual void                       damageEntire() override;
 
-    virtual bool                       onInputOnDeco(const eInputType, const Vector2D&, std::any = {});
+    virtual bool                       onInputOnDeco(const eInputType, const Vector2D&, std::any = {}) override;
 
-    virtual eDecorationLayer           getDecorationLayer();
+    virtual eDecorationLayer           getDecorationLayer() override;
 
-    virtual uint64_t                   getDecorationFlags();
+    virtual uint64_t                   getDecorationFlags() override;
 
-    virtual std::string                getDisplayName();
+    virtual std::string                getDisplayName() override;
 
   private:
     CBox                      m_assignedBox = {0};
@@ -64,6 +64,7 @@ class CHyprGroupBarDecoration : public IHyprWindowDecoration {
     void                      invalidateTextures();
 
     CBox                      assignedBoxGlobal();
+    CBox                      assignedBoxGlobal(const Render::SWindowRenderPresentation& presentation);
     bool                      visible();
 
     bool                      onBeginWindowDragOnDeco(const Vector2D&);

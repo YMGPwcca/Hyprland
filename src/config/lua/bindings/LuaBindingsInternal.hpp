@@ -141,8 +141,8 @@ namespace Config::Lua::Bindings::Internal {
     int                                                checkResult(lua_State* L, const Config::Actions::ActionResult& r);
     int                                                pushSuccessResult(lua_State* L, const Config::Actions::SActionResult& r = {});
     int                                                pushErrorResult(lua_State* L, const Config::Actions::SActionError& e);
+    Keybinds::SBindResult                              bindResultFromTable(lua_State* L, int idx);
     void                                               reportError(lua_State* L, const Config::Actions::SActionError& e);
-    PHLWORKSPACE                                       resolveWorkspaceStr(const std::string& args);
     PHLMONITOR                                         resolveMonitorStr(const std::string& args);
     std::string                                        getSourceInfo(lua_State* L, int stackLevel = 1);
 
@@ -184,11 +184,11 @@ namespace Config::Lua::Bindings::Internal {
         return nullptr;
     }
 
-    void setFn(lua_State* L, const char* name, lua_CFunction fn);
-    void setMgrFn(lua_State* L, CConfigManager* mgr, const char* name, lua_CFunction fn);
-    void markDispatcherTable(lua_State* L);
-    int  wrapDispatcher(lua_State* L);
-    bool pushDispatcherFunction(lua_State* L, int idx);
+    void                             setFn(lua_State* L, const char* name, lua_CFunction fn);
+    void                             setMgrFn(lua_State* L, CConfigManager* mgr, const char* name, lua_CFunction fn);
+    void                             setDispatcherFn(lua_State* L, const char* name, lua_CFunction fn, int maxArgs);
+    int                              wrapDispatcher(lua_State* L);
+    std::expected<void, std::string> pushDispatcherFunction(lua_State* L, int idx);
 
     template <typename T>
     SParseError parseTableField(lua_State* L, int tableIdx, const char* field, T& parser) {

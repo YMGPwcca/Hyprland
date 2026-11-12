@@ -20,6 +20,7 @@
 #include "../debug/log/Logger.hpp"
 #include "../protocols/types/ContentType.hpp"
 #include "../state/MonitorState.hpp"
+#include "../helpers/string/StringUtils.hpp"
 #include "OpenGL.hpp"
 #include "Renderer.hpp"
 #include "./gl/GLElementRenderer.hpp"
@@ -45,11 +46,26 @@ extern "C" {
 }
 
 CHyprGLRenderer::CHyprGLRenderer() : IHyprRenderer(), m_elementRenderer(makeUnique<CGLElementRenderer>()) {
+    // KMS can be display-only; classify the active GL renderer instead of the DRM driver.
+    g_pHyprOpenGL->makeEGLCurrent();
+    if (const auto* renderer = rc<const char*>(glGetString(GL_RENDERER))) {
+        const std::string_view name{renderer};
+        m_software = StringUtils::containsCaseInsensitive(name, "llvmpipe") || StringUtils::containsCaseInsensitive(name, "softpipe") ||
+            StringUtils::containsCaseInsensitive(name, "Software Rasterizer");
+    }
+
     refreshBlurProvider();
     m_preRenderListener = Event::bus()->m_events.render.pre.listen([this](PHLMONITOR monitor) { preRender(monitor); });
 }
 
-CHyprGLRenderer::~CHyprGLRenderer() = default;
+CHyprGLRenderer::~CHyprGLRenderer() {
+    // The renderer is destroyed before OpenGL. Complete even submissions whose
+    // readable callbacks will only be discarded during event-loop teardown.
+    g_pHyprOpenGL->makeEGLCurrent();
+    glFinish();
+    m_context.m_usedAsyncBuffers.clear();
+    m_pendingBufferUses.clear();
+}
 
 IHyprRenderer::eType CHyprGLRenderer::type() {
     return RT_GL;
@@ -57,69 +73,82 @@ IHyprRenderer::eType CHyprGLRenderer::type() {
 
 void CHyprGLRenderer::initRender() {
     g_pHyprOpenGL->makeEGLCurrent();
-    g_pHyprRenderer->m_renderData.pMonitor = renderData().pMonitor;
 }
 
-bool CHyprGLRenderer::initRenderBuffer(SP<Aquamarine::IBuffer> buffer, uint32_t fmt) {
+bool CHyprGLRenderer::initRenderBuffer(CRenderContext& ctx, SP<Aquamarine::IBuffer> buffer, uint32_t fmt) {
     try {
-        m_currentRenderbuffer = getOrCreateRenderbuffer(m_currentBuffer, fmt);
+        ctx.m_currentRenderbuffer = getOrCreateRenderbuffer(buffer, fmt);
     } catch (std::exception& e) {
         LOG(Log::ERR, "getOrCreateRenderbuffer failed for {}", NFormatUtils::drmFormatName(fmt));
         return false;
     }
 
-    return !!m_currentRenderbuffer;
+    return !!ctx.m_currentRenderbuffer;
 }
 
-bool CHyprGLRenderer::beginFullFakeRenderInternal(PHLMONITOR pMonitor, CRegion& damage, SP<IFramebuffer> fb, bool simple) {
+bool CHyprGLRenderer::beginFullFakeRenderInternal(CRenderContext& ctx, PHLMONITOR pMonitor, CRegion& damage, SP<IFramebuffer> fb, bool simple) {
     initRender();
 
     RASSERT(fb, "Cannot render FULL_FAKE without a provided fb!");
-    bindFB(fb);
+    bindFB(ctx, fb);
     if (simple)
-        g_pHyprOpenGL->beginSimple(pMonitor, damage, nullptr, fb);
+        g_pHyprOpenGL->beginSimple(ctx, pMonitor, damage, nullptr, fb);
     else
-        g_pHyprOpenGL->begin(pMonitor, damage, fb);
+        return g_pHyprOpenGL->begin(ctx, pMonitor, damage, fb);
     return true;
 }
 
-bool CHyprGLRenderer::beginRenderInternal(PHLMONITOR pMonitor, CRegion& damage, bool simple) {
+bool CHyprGLRenderer::beginRenderInternal(CRenderContext& ctx, PHLMONITOR pMonitor, CRegion& damage, bool simple) {
 
-    m_currentRenderbuffer->bind();
+    ctx.m_currentRenderbuffer->bind();
+    ctx.m_data.currentFB = ctx.m_currentRenderbuffer->getFB();
     if (simple)
-        g_pHyprOpenGL->beginSimple(pMonitor, damage, m_currentRenderbuffer);
+        g_pHyprOpenGL->beginSimple(ctx, pMonitor, damage, ctx.m_currentRenderbuffer);
     else
-        g_pHyprOpenGL->begin(pMonitor, damage);
+        return g_pHyprOpenGL->begin(ctx, pMonitor, damage);
 
     return true;
 }
 
-void CHyprGLRenderer::endRender(const std::function<void()>& renderingDoneCallback) {
-    const auto  PMONITOR           = g_pHyprRenderer->m_renderData.pMonitor;
-    static auto PNVIDIAANTIFLICKER = CConfigValue<Config::INTEGER>("opengl:nvidia_anti_flicker");
-
-    g_pHyprRenderer->m_renderData.damage = m_renderPass.render(g_pHyprRenderer->m_renderData.damage);
-
-    auto cleanup = CScopeGuard([this]() {
-        if (m_currentRenderbuffer)
-            m_currentRenderbuffer->unbind();
-        m_currentRenderbuffer = nullptr;
-        m_currentBuffer       = nullptr;
-    });
-
-    if (m_renderMode != RENDER_MODE_TO_BUFFER_READ_ONLY)
-        g_pHyprOpenGL->end();
-    else {
-        g_pHyprRenderer->m_renderData.pMonitor.reset();
-        g_pHyprRenderer->m_renderData.mouseZoomFactor   = 1.f;
-        g_pHyprRenderer->m_renderData.mouseZoomUseMouse = true;
+SRenderResult CHyprGLRenderer::endRender(const std::function<void()>& renderingDoneCallback) {
+    if (!m_context.active()) {
+        LOG(Log::ERR, "Cannot end rendering without an active render context");
+        return {};
     }
 
-    if (m_renderMode == RENDER_MODE_FULL_FAKE)
-        return;
+    bool              finished = false;
+    const CScopeGuard cleanup([&] {
+        if (!finished)
+            abortRender();
+    });
 
-    if (m_renderMode == RENDER_MODE_NORMAL)
-        PMONITOR->m_output->state->setBuffer(m_currentBuffer);
+    const auto        PMONITOR           = m_context.m_data.pMonitor;
+    const auto        mode               = m_context.m_mode;
+    static auto       PNVIDIAANTIFLICKER = CConfigValue<Config::INTEGER>("opengl:nvidia_anti_flicker");
+
+    m_context.m_data.damage = m_context.m_pass.render(m_context, m_context.m_data.damage);
+
+    if (mode != RENDER_MODE_TO_BUFFER_READ_ONLY)
+        g_pHyprOpenGL->end(m_context);
+
+    SRenderResult result{
+        .finalDamage = m_context.m_data.damage,
+    };
+
+    if (mode == RENDER_MODE_NORMAL)
+        PMONITOR->m_output->state->setBuffer(m_context.m_currentBuffer);
+
+    // All draws use the same EGL context, so this submission also covers earlier
+    // snapshots and aborted draws. Detach their locks before resetting the session.
+    mergeSurfaceBufferUses(m_pendingBufferUses, m_context.m_usedAsyncBuffers);
+    auto completedBuffers = mode == RENDER_MODE_FULL_FAKE ? std::vector<SSurfaceBufferUse>{} : std::exchange(m_pendingBufferUses, {});
+
+    // Callbacks may begin another render. Release this session before invoking them.
+    finishRender();
+    finished = true;
+
+    if (mode == RENDER_MODE_FULL_FAKE)
+        return result;
 
     if (!explicitSyncSupported()) {
         LOG(Log::TRACE, "renderer: Explicit sync unsupported, falling back to implicit in endRender");
@@ -130,58 +159,64 @@ void CHyprGLRenderer::endRender(const std::function<void()>& renderingDoneCallba
         else
             glFlush(); // mark an implicit sync point
 
-        PMONITOR->m_usedAsyncBuffers.clear(); // release all buffer refs and hope implicit sync works
+        completedBuffers.clear(); // release all buffer refs and hope implicit sync works
         if (renderingDoneCallback)
             renderingDoneCallback();
 
-        return;
+        return result;
     }
 
     auto eglSync = createSyncFDManager();
     if LIKELY (eglSync && eglSync->isValid()) {
-        for (auto& buf : PMONITOR->m_usedAsyncBuffers) {
-            if (buf.first.expired()) // surface is gone.
-                continue;
-
-            for (const auto& releaser : buf.second->m_syncReleasers) {
-                releaser->addSyncFileFd(eglSync->fd());
-            }
-        }
-
-        // release buffer refs with release points now, since syncReleaser handles actual buffer release based on EGLSync
-        std::erase_if(PMONITOR->m_usedAsyncBuffers, [](const auto& buf) { return buf.first.expired() || !buf.second->m_syncReleasers.empty(); });
-
-        // release buffer refs without release points when EGLSync sync_file/fence is signalled
-        g_pEventLoopManager->doOnReadable(eglSync->fd().duplicate(), [renderingDoneCallback, prevbfs = std::move(PMONITOR->m_usedAsyncBuffers)]() mutable {
-            prevbfs.clear();
-            if (renderingDoneCallback)
-                renderingDoneCallback();
-        });
-        PMONITOR->m_usedAsyncBuffers.clear();
-
-        if (m_renderMode == RENDER_MODE_NORMAL) {
+        auto       completionFD      = eglSync->fd().duplicate();
+        const bool asyncReleaseReady = completionFD.isValid() && attachSurfaceBufferReleaseFences(completedBuffers, eglSync->fd());
+        if (mode == RENDER_MODE_NORMAL) {
             PMONITOR->m_inFence = eglSync->takeFd();
             PMONITOR->m_output->state->setExplicitInFence(PMONITOR->m_inFence.get());
         }
+
+        // This may run inline. Finish all monitor bookkeeping before handing off.
+        eglSync.reset();
+        if (!asyncReleaseReady) {
+            LOG(Log::ERR, "renderer: Failed to prepare release fences, waiting for GPU completion");
+            // A missing completion FD or release fence cannot protect explicit-sync clients.
+            glFinish();
+            completedBuffers.clear();
+            if (renderingDoneCallback)
+                renderingDoneCallback();
+            return result;
+        }
+
+        releaseSurfaceBuffersOnReadable(std::move(completionFD), std::move(completedBuffers), renderingDoneCallback);
     } else {
-        LOG(Log::ERR, "renderer: Explicit sync failed, falling back to implicit sync");
+        LOG(Log::ERR, "renderer: Explicit sync failed, waiting for GPU completion");
 
-        // Establish an implicit synchronization point without blocking the render loop.
-        glFlush();
+        // Without a fence, explicit-sync clients need GPU completion before release.
+        glFinish();
 
-        if (m_renderMode == RENDER_MODE_NORMAL && PMONITOR) {
+        if (mode == RENDER_MODE_NORMAL && PMONITOR) {
             PMONITOR->m_inFence.reset();
             PMONITOR->m_output->state->resetExplicitFences();
         }
 
-        PMONITOR->m_usedAsyncBuffers.clear();
+        eglSync.reset();
+        completedBuffers.clear();
         if (renderingDoneCallback)
             renderingDoneCallback();
     }
+
+    return result;
 }
 
-void CHyprGLRenderer::renderOffToMain(SP<IFramebuffer> off) {
-    g_pHyprOpenGL->renderOffToMain(off);
+void CHyprGLRenderer::abortRender() {
+    // Immediate draws may already have sampled these buffers. A later submission
+    // (or shutdown) must synchronize them, without reporting a completed frame.
+    mergeSurfaceBufferUses(m_pendingBufferUses, m_context.m_usedAsyncBuffers);
+    IHyprRenderer::abortRender();
+}
+
+void CHyprGLRenderer::renderOffToMain(CRenderContext& ctx, SP<IFramebuffer> off) {
+    g_pHyprOpenGL->renderOffToMain(ctx, off);
 }
 
 SP<IRenderbuffer> CHyprGLRenderer::getOrCreateRenderbufferInternal(SP<Aquamarine::IBuffer> buffer, uint32_t fmt) {
@@ -296,34 +331,35 @@ SP<IFramebuffer> CHyprGLRenderer::createFB(const std::string& name) {
 }
 
 void CHyprGLRenderer::disableScissor() {
-    g_pHyprOpenGL->scissor(nullptr);
+    g_pHyprOpenGL->disableScissor();
 }
 
 void CHyprGLRenderer::blend(bool enabled) {
     g_pHyprOpenGL->blend(enabled);
 }
 
-void CHyprGLRenderer::drawShadow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) {
-    g_pHyprOpenGL->renderRoundedShadow(box, round, roundingPower, range, color, a);
+void CHyprGLRenderer::drawShadow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a,
+                                 const Render::SWindowRenderPresentation& presentation) {
+    g_pHyprOpenGL->renderRoundedShadow(ctx, box, round, roundingPower, range, color, a, presentation);
 }
 
-void CHyprGLRenderer::drawShadow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2,
-                                 float lerp, float a) {
-    g_pHyprOpenGL->renderRoundedShadow(box, round, roundingPower, range, grad1, grad2, lerp, a);
+void CHyprGLRenderer::drawShadow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1,
+                                 const Config::CGradientValueData& grad2, float lerp, float a, const Render::SWindowRenderPresentation& presentation) {
+    g_pHyprOpenGL->renderRoundedShadow(ctx, box, round, roundingPower, range, grad1, grad2, lerp, a, presentation);
 }
 
-void CHyprGLRenderer::drawGlow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) {
-    g_pHyprOpenGL->renderInnerGlow(box, round, roundingPower, range, color, 0, a);
+void CHyprGLRenderer::drawGlow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) {
+    g_pHyprOpenGL->renderInnerGlow(ctx, box, round, roundingPower, range, color, 0, a);
 }
 
-void CHyprGLRenderer::drawGlow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2,
-                               float lerp, float a) {
-    g_pHyprOpenGL->renderInnerGlow(box, round, roundingPower, range, grad1, grad2, lerp, 0, a);
+void CHyprGLRenderer::drawGlow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1,
+                               const Config::CGradientValueData& grad2, float lerp, float a) {
+    g_pHyprOpenGL->renderInnerGlow(ctx, box, round, roundingPower, range, grad1, grad2, lerp, 0, a);
 }
 
-SP<IFramebuffer> CHyprGLRenderer::blurFramebuffer(SP<IFramebuffer> source, float strength, const CRegion& originalDamage, const SBlurContext& context) {
+SP<IFramebuffer> CHyprGLRenderer::blurFramebuffer(CRenderContext& ctx, SP<IFramebuffer> source, float strength, const CRegion& originalDamage, const SBlurContext& context) {
     RASSERT(m_blur, "Cannot blur without a blur provider");
-    return m_blur->blur(source, strength, originalDamage, context);
+    return m_blur->blur(ctx, source, strength, originalDamage, context);
 }
 
 void CHyprGLRenderer::refreshBlurProvider() {
@@ -341,8 +377,8 @@ void CHyprGLRenderer::expandBlurDamage(CRegion& damage, float multiplier) const 
     m_blur->expandDamage(damage, multiplier);
 }
 
-bool CHyprGLRenderer::blurProviderIsAnimated() const {
-    return m_blur && m_blur->isAnimated();
+bool CHyprGLRenderer::blurProviderIsAnimated(CRenderContext& ctx) const {
+    return m_blur && m_blur->isAnimated(ctx);
 }
 
 bool CHyprGLRenderer::blurProviderRequiresLiveBlur() const {

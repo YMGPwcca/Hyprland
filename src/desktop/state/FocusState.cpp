@@ -8,12 +8,12 @@
 #include "../../ipc/s2/S2.hpp"
 #include "../../managers/input/InputManager.hpp"
 #include "../../managers/SeatManager.hpp"
-#include "../../protocols/PointerConstraints.hpp"
 #include "animation/WorkspaceAnimationController.hpp"
 #include "../../managers/fullscreen/FullscreenController.hpp"
 #include "../../layout/LayoutManager.hpp"
 #include "../../layout/target/WindowTarget.hpp"
 #include "../../event/EventBus.hpp"
+#include "../../workspace/query/Query.hpp"
 
 using namespace Desktop;
 
@@ -124,6 +124,8 @@ void CFocusState::rawWindowFocus(PHLWINDOW pWindow, eFocusReason reason, SP<CWLS
     if (pWindow)
         g_layoutManager->bringTargetToTop(pWindow->windowTarget());
 
+    auto constraintGuard = g_pInputManager->pointerConstraints().suspend();
+
     if (!pWindow || !validMapped(pWindow)) {
 
         if (m_focusWindow.expired() && !pWindow)
@@ -165,11 +167,11 @@ void CFocusState::rawWindowFocus(PHLWINDOW pWindow, eFocusReason reason, SP<CWLS
 
     const auto PMONITOR = pWindow->m_monitor.lock();
 
-    if (!pWindow->m_workspace || !pWindow->m_workspace->isVisible()) {
+    if (!pWindow->m_workspace || !pWindow->m_workspace->visible()) {
         const auto PWORKSPACE = pWindow->m_workspace;
         // This is to fix incorrect feedback on the focus history.
-        PWORKSPACE->m_lastFocusedWindow = pWindow;
-        if (PWORKSPACE->m_isSpecialWorkspace)
+        PWORKSPACE->rememberFocusedWindow(pWindow);
+        if (PWORKSPACE->type() == Workspace::eWorkspaceType::SPECIAL)
             m_focusMonitor->changeWorkspace(PWORKSPACE, false, true); // if special ws, open on current monitor
         else if (PMONITOR)
             PMONITOR->changeWorkspace(PWORKSPACE, false, true);
@@ -180,9 +182,9 @@ void CFocusState::rawWindowFocus(PHLWINDOW pWindow, eFocusReason reason, SP<CWLS
     if (PMONITOR && !(pWindow->m_state & Desktop::View::WINDOW_STATE_PINNED))
         rawMonitorFocus(PMONITOR);
 
-    const auto PLASTWINDOW                    = m_focusWindow.lock();
-    m_focusWindow                             = pWindow;
-    pWindow->m_workspace->m_lastFocusedWindow = pWindow;
+    const auto PLASTWINDOW = m_focusWindow.lock();
+    m_focusWindow          = pWindow;
+    pWindow->m_workspace->rememberFocusedWindow(pWindow);
 
     /* If special fallthrough is enabled, this behavior will be disabled, as I have no better idea of nicely tracking which
        window focuses are "via keybinds" and which ones aren't. */
@@ -238,7 +240,7 @@ void CFocusState::rawSurfaceFocus(SP<CWLSurfaceResource> pSurface, PHLWINDOW pWi
         return;
     }
 
-    const auto PLASTSURF = m_focusSurface.lock();
+    auto constraintGuard = g_pInputManager->pointerConstraints().suspend();
 
     // Unfocus last surface if should
     if (m_focusSurface && !pWindowOwner)
@@ -265,15 +267,6 @@ void CFocusState::rawSurfaceFocus(SP<CWLSurfaceResource> pSurface, PHLWINDOW pWi
     m_focusSurface = pSurface;
 
     Event::bus()->m_events.input.keyboard.focus.emit(pSurface);
-
-    const auto SURF    = Desktop::View::CWLSurface::fromResource(pSurface);
-    const auto OLDSURF = Desktop::View::CWLSurface::fromResource(PLASTSURF);
-
-    if (OLDSURF && OLDSURF->constraint())
-        OLDSURF->constraint()->deactivate();
-
-    if (SURF && SURF->constraint())
-        SURF->constraint()->activate();
 }
 
 void CFocusState::rawMonitorFocus(PHLMONITOR pMonitor) {
@@ -287,11 +280,11 @@ void CFocusState::rawMonitorFocus(PHLMONITOR pMonitor) {
 
     const auto PWORKSPACE = pMonitor->m_activeWorkspace;
 
-    const auto WORKSPACE_ID   = PWORKSPACE ? std::to_string(PWORKSPACE->m_id) : std::to_string(WORKSPACE_INVALID);
-    const auto WORKSPACE_NAME = PWORKSPACE ? PWORKSPACE->m_name : "?";
+    const auto WORKSPACE_ADDRESS = PWORKSPACE ? PWORKSPACE->addressableName() : "";
+    const auto WORKSPACE_NAME    = PWORKSPACE ? PWORKSPACE->addressableName() : "?";
 
     IPC::Socket2::sock()->postEvent({.event = "focusedmon", .data = std::format("{},{}", pMonitor->m_name, WORKSPACE_NAME)});
-    IPC::Socket2::sock()->postEvent({.event = "focusedmonv2", .data = std::format("{},{}", pMonitor->m_name, WORKSPACE_ID)});
+    IPC::Socket2::sock()->postEvent({.event = "focusedmonv2", .data = std::format("{},{}", pMonitor->m_name, WORKSPACE_ADDRESS)});
 
     Event::bus()->m_events.monitor.focused.emit(pMonitor);
     m_focusMonitor = pMonitor;
@@ -330,6 +323,9 @@ bool CFocusState::isWindowActive(PHLWINDOW pWindow) const {
 }
 
 bool Desktop::isHardInputFocusReason(eFocusReason r) {
-    return r == FOCUS_REASON_NEW_WINDOW || r == FOCUS_REASON_KEYBIND || r == FOCUS_REASON_GHOSTS || r == FOCUS_REASON_CLICK_UP || r == FOCUS_REASON_DESKTOP_STATE_CHANGE ||
-        r == FOCUS_REASON_UNMAP_WINDOW_TILING || r == FOCUS_REASON_SWITCH_TO_WINDOW_HARD;
+
+    static const auto PFOLLOW_FOCUS = CConfigValue<Config::INTEGER>("scrolling:follow_focus");
+
+    return r == FOCUS_REASON_NEW_WINDOW || r == FOCUS_REASON_KEYBIND || r == FOCUS_REASON_GHOSTS || ((*PFOLLOW_FOCUS == 1) ? (r == FOCUS_REASON_CLICK_UP) : false) ||
+        r == FOCUS_REASON_DESKTOP_STATE_CHANGE || r == FOCUS_REASON_UNMAP_WINDOW_TILING || r == FOCUS_REASON_SWITCH_TO_WINDOW_HARD;
 }

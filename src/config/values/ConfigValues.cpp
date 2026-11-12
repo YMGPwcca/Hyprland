@@ -1,4 +1,5 @@
 #include "ConfigValues.hpp"
+#include "config/shared/Types.hpp"
 
 using namespace Config;
 using namespace Config::Values;
@@ -214,7 +215,7 @@ std::vector<SP<IValue>> Values::getConfigValues() {
                      {.refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Vec2>("decoration:shadow:offset", "shadow's rendering offset.", Config::VEC2{},
                  {.validator = vec2Range(-250, -250, 250, 250), .refresh = Supplementary::REFRESH_WINDOW_STATES}),
-        MS<Float>("decoration:shadow:scale", "shadow's scale.", 1, {.min = 0.05, .max = 2, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
+        MS<Float>("decoration:shadow:scale", "shadow's scale.", 1, {.min = 0.01, .max = 2, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Bool>("decoration:glow:enabled", "enable inner glow on windows", false, {.refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Int>("decoration:glow:range", "glow range (size) in layout px", 10, {.min = 0, .max = 100, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Int>("decoration:glow:render_power", "in what power to render the falloff (more power, the faster the falloff)", 3,
@@ -260,6 +261,7 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Bool>("decoration:blur:ignore_opacity", "make the blur layer ignore the opacity of the window", true, {.refresh = Supplementary::REFRESH_BLUR_FB}),
         MS<Bool>("decoration:blur:new_optimizations", "whether to enable further optimizations to the blur.", true, {.refresh = Supplementary::REFRESH_BLUR_FB}),
         MS<Bool>("decoration:blur:xray", "if enabled, floating windows will ignore tiled windows in their blur.", false, {.refresh = Supplementary::REFRESH_BLUR_FB}),
+        MS<Bool>("decoration:blur:proportional", "if enabled, blur strength will be proportional to pixel opacity", false),
         MS<Float>("decoration:blur:noise", "how much noise to apply.", 0.0117, {.min = 0, .max = 1, .refresh = Supplementary::REFRESH_BLUR_FB}),
         MS<Float>("decoration:blur:contrast", "contrast modulation for blur.", 0.8916, {.min = 0, .max = 2, .refresh = Supplementary::REFRESH_BLUR_FB}),
         MS<Float>("decoration:blur:brightness", "brightness modulation for blur.", 1, {.min = 0, .max = 2, .refresh = Supplementary::REFRESH_BLUR_FB}),
@@ -363,7 +365,7 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Float>("input:sensitivity", "Sets the mouse input sensitivity. Value is clamped to the range -1.0 to 1.0.", 0,
                   {.min = -1, .max = 1, .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<String>("input:accel_profile", "Sets the cursor acceleration profile. [adaptive/flat/custom]", STRVAL_EMPTY,
-                   {.validator = strChoice({"adaptive", "flat", "custom"}), .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
+                   {.validator = strChoice({"adaptive", "flat", "custom*"}), .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Bool>("input:force_no_accel", "Force no cursor acceleration.", false, {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Int>("input:rotation", "Sets the rotation of a device in degrees clockwise. Value is clamped to the range 0 to 359.", 0,
                 {.min = 0, .max = 359, .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
@@ -375,11 +377,12 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Int>("input:scroll_button", "Sets the scroll button. 0 means default.", 0, {.min = 0, .max = 300, .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Bool>("input:scroll_button_lock", "If the scroll button lock is enabled, the button does not need to be held down.", false,
                  {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
-        MS<Float>("input:scroll_factor", "Multiplier added to scroll movement for external mice.", 1, {.min = 0, .max = 2, .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
+        MS<Float>("input:scroll_factor", "Multiplier added to scroll movement for external mice.", 1, {.min = 0, .max = 100, .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Bool>("input:natural_scroll", "Inverts scrolling direction.", false, {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Int>("input:follow_mouse", "Specify if and how cursor movement should affect window focus.", 1,
                 {.min = 0, .max = 3, .map = OptionMap{{"disabled", 0}, {"follow", 1}, {"detached", 2}, {"separate", 3}}, .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Float>("input:follow_mouse_threshold", "The smallest distance in logical pixels the mouse needs to travel for the window under it to get focused.", 0),
+        MS<Bool>("input:swallow_focus_click", "If enabled, the click that changes window focus is not forwarded to the window.", false),
         MS<Int>("input:focus_on_close", "Controls the window focus behavior when a window is closed.", 0,
                 {.min = 0, .max = 2, .map = OptionMap{{"next", 0}, {"cursor", 1}, {"mru", 2}}, .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Bool>("input:mouse_refocus", "if disabled, mouse focus won't switch to the hovered window unless the mouse crosses a window boundary when follow_mouse=1.", true),
@@ -403,7 +406,8 @@ std::vector<SP<IValue>> Values::getConfigValues() {
 
         MS<Bool>("input:touchpad:disable_while_typing", "Disable the touchpad while typing.", true, {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Bool>("input:touchpad:natural_scroll", "Inverts scrolling direction.", false, {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
-        MS<Float>("input:touchpad:scroll_factor", "Multiplier applied to the amount of scroll movement.", 1, {.min = 0, .max = 2, .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
+        MS<Float>("input:touchpad:scroll_factor", "Multiplier applied to the amount of scroll movement.", 1,
+                  {.min = 0, .max = 100, .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Bool>("input:touchpad:middle_button_emulation", "Sending LMB and RMB simultaneously will be interpreted as a middle click.", false,
                  {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<String>("input:touchpad:tap_button_map", "Sets the tap button mapping for touchpad button emulation. [lrm/lmr]", STRVAL_EMPTY,
@@ -441,20 +445,21 @@ std::vector<SP<IValue>> Values::getConfigValues() {
          * input:tablet:
          */
 
+        MS<Bool>("input:tablet:enabled", "Whether input is enabled for tablets.", true, {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Int>("input:tablet:transform", "transform the input from tablets.", 0, {.min = 0, .max = 6, .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<String>("input:tablet:output", "the monitor to bind tablets.", STRVAL_EMPTY, {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Vec2>("input:tablet:region_position", "position of the mapped region in monitor layout.", Config::VEC2{},
-                 {.validator = vec2Range(-20000, -20000, 20000, 20000), .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
+                 {.validator = vec2Range(-100000, -100000, 100000, 100000), .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Bool>("input:tablet:absolute_region_position", "whether to treat the region_position as an absolute position in monitor layout.", false,
                  {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Vec2>("input:tablet:region_size", "size of the mapped region.", Config::VEC2{},
-                 {.validator = vec2Range(-100, -100, 4000, 4000), .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
+                 {.validator = vec2Range(1, 1, 100000, 100000), .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Bool>("input:tablet:relative_input", "whether the input should be relative", false, {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Bool>("input:tablet:left_handed", "if enabled, the tablet will be rotated 180 degrees", false, {.refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Vec2>("input:tablet:active_area_size", "size of tablet's active area in mm", Config::VEC2{},
-                 {.validator = vec2Range(0, 0, 500, 500), .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
+                 {.validator = vec2Range(0, 0, 5000, 5000), .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
         MS<Vec2>("input:tablet:active_area_position", "position of the active area in mm", Config::VEC2{},
-                 {.validator = vec2Range(0, 0, 500, 500), .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
+                 {.validator = vec2Range(0, 0, 5000, 5000), .refresh = Supplementary::REFRESH_INPUT_DEVICES}),
 
         /*
          * input:tablettool:
@@ -568,7 +573,8 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Bool>("misc:key_press_enables_dpms", "If DPMS is set to off, wake up the monitors if a key is pressed.", false),
         MS<Bool>("misc:name_vk_after_proc", "Name virtual keyboards after the processes that create them.", true),
         MS<Bool>("misc:always_follow_on_dnd", "Will make mouse focus follow the mouse when drag and dropping.", true),
-        MS<Bool>("misc:layers_hog_keyboard_focus", "If true, will make keyboard-interactive layers keep their focus on mouse move.", true),
+        MS<Bool>("misc:layers_hog_keyboard_focus", "If true, will make keyboard-interactive layers keep their focus on mouse move.", true,
+                 {.deprecationNotice = "Moved to layers category. Use layers:layers_hog_keyboard_focus instead."}),
         MS<Bool>("misc:animate_manual_resizes", "If true, will animate manual window resizes/moves", false),
         MS<Bool>("misc:animate_mouse_windowdragging", "If true, will animate windows being dragged by mouse.", false),
         MS<Bool>("misc:disable_autoreload", "If true, the config will not reload automatically on save.", false, {.refresh = Supplementary::REFRESH_CONFIG_WATCHER}),
@@ -605,12 +611,22 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Int>("misc:float_force_onscreen", "whether existing floating windows must remain fully/partially on-screen", 0),
 
         /*
+         * layer:
+         */
+        MS<Bool>("layers:allow_new_top_layers_over_existing_fullscreen",
+                 "If false, newly mapped layers are not allowed to render over existing covering fullscreen window. Note that fullscreen hides all pre-existing top layers "
+                 "regardless of this setting",
+                 true),
+        MS<Bool>("layers:layers_hog_keyboard_focus", "If true, will make keyboard-interactive layers keep their focus on mouse move.", true),
+
+        /*
          * binds:
          */
 
         MS<Bool>("binds:pass_mouse_when_bound", "if disabled, will not pass the mouse events to apps / dragging windows around if a keybind has been triggered.", false),
         MS<Int>("binds:scroll_event_delay", "in ms, how many ms to wait after a scroll event to allow passing another one for the binds.", 300, {.min = 0, .max = 2000}),
-        MS<Bool>("binds:workspace_back_and_forth", "If enabled, an attempt to switch to the currently focused workspace will instead switch to the previous workspace.", false),
+        MS<Int>("binds:workspace_back_and_forth", "An attempt to switch to the currently focused workspace will instead switch to the previous workspace.", 0,
+                {.min = 0, .max = 2, .map = OptionMap{{"disabled", 0}, {"all_monitors", 1}, {"per_monitor", 2}}}),
         MS<Bool>("binds:hide_special_on_workspace_change", "If enabled, changing the active workspace will hide the special workspace on the monitor.", false),
         MS<Bool>("binds:allow_workspace_cycles", "If enabled, workspaces don't forget their previous workspace.", false),
         MS<Int>("binds:workspace_center_on", "Whether switching workspaces should center the cursor on the workspace (0) or on the last active window (1)", 1,
@@ -623,6 +639,7 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Bool>("binds:window_direction_monitor_fallback", "If enabled, moving a window or focus over the edge of a monitor with a direction will move it to the next monitor.",
                  true),
         MS<Bool>("binds:allow_pin_fullscreen", "Allows fullscreen to pinned windows, and restore their pinned status afterwards", false),
+        MS<Bool>("binds:client_requested_fs_uses_layout_handler", "If false, client requested FS will use default FS handler", true),
         MS<Int>("binds:drag_threshold", "Movement threshold in pixels for window dragging and c/g bind flags. 0 to disable.", 0,
                 {.min = 0, .max = std::numeric_limits<int>::max()}),
         MS<Bool>("binds:drag_center_window", "If enabled, dragging a tiled or fullscreen window will center it on the cursor when it becomes floating.", true),
@@ -683,7 +700,7 @@ std::vector<SP<IValue>> Values::getConfigValues() {
                 {.min = 0, .max = 2, .map = OptionMap{{"disable", 0}, {"enable", 1}, {"auto", 2}}}),
         MS<Int>("cursor:min_refresh_rate", "minimum refresh rate for cursor movement when no_break_fs_vrr is active.", 24, {.min = 10, .max = 500}),
         MS<Int>("cursor:hotspot_padding", "the padding, in logical px, between screen edges and the cursor", 0, {.min = 0, .max = 20}),
-        MS<Float>("cursor:inactive_timeout", "in seconds, after how many seconds of cursor's inactivity to hide it. Set to 0 for never.", 0, {.min = 0, .max = 20}),
+        MS<Float>("cursor:inactive_timeout", "in seconds, after how many seconds of cursor's inactivity to hide it. Set to 0 for never.", 0, {.min = 0, .max = 1000}),
         MS<Bool>("cursor:no_warps", "if true, will not warp the cursor in many cases", false),
         MS<Bool>("cursor:persistent_warps", "When a window is refocused, the cursor returns to its last position relative to that window.", false),
         MS<Int>("cursor:warp_on_change_workspace", "Move the cursor to the last focused window after changing the workspace.", 0,
@@ -693,7 +710,7 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Int>("cursor:warp_on_toggle_special", "Move the cursor to the last focused window when toggling a special workspace.", 0,
                 {.min = 0, .max = 2, .map = OptionMap{{"disable", 0}, {"enable", 1}, {"force", 2}}}),
         MS<String>("cursor:default_monitor", "the name of a default monitor for the cursor to be set to on startup", STRVAL_EMPTY),
-        MS<Float>("cursor:zoom_factor", "the factor to zoom by around the cursor. 1 means no zoom.", 1, {.min = 1, .max = 10, .refresh = Supplementary::REFRESH_CURSOR_ZOOMS}),
+        MS<Float>("cursor:zoom_factor", "the factor to zoom by around the cursor. 1 means no zoom.", 1, {.min = 1, .max = 50, .refresh = Supplementary::REFRESH_CURSOR_ZOOMS}),
         MS<Bool>("cursor:zoom_rigid", "whether the zoom should follow the cursor rigidly or loosely", false),
         MS<Bool>("cursor:zoom_disable_aa", "If enabled, when zooming, no antialiasing will be used", false),
         MS<Bool>("cursor:zoom_detached_camera", "Detaches the camera from the mouse when zoomed in", true),
@@ -802,7 +819,10 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Float>("scrolling:column_width", "the default width of a column.", 0.5, {.min = 0.1, .max = 1.0}),
         MS<Int>("scrolling:focus_fit_method", "When a column is focused, what method should be used to bring it into view", 1,
                 {.min = 0, .max = 1, .map = OptionMap{{"center", 0}, {"fit", 1}}}),
-        MS<Bool>("scrolling:follow_focus", "when a window is focused, should the layout move to bring it into view automatically", true),
+        MS<Int>("scrolling:follow_focus",
+                "Behaviour of the scrolling tape when a window is in focus. 0: Focus doesn't cause tape move. 1: Focus may cause tape move, mouse click always moves the tape. 2: "
+                "Focus may cause tape move.",
+                1),
         MS<Float>("scrolling:follow_min_visible", "when a window is focused, require that at least a given fraction of it is visible for focus to follow", 0.4,
                   {.min = 0.0, .max = 1.0}),
         MS<String>("scrolling:explicit_column_widths", "A comma-separated list of preconfigured widths for colresize +conf/-conf", "0.333, 0.5, 0.667, 1.0"),
@@ -827,7 +847,7 @@ std::vector<SP<IValue>> Values::getConfigValues() {
          */
 
         MS<Int>("quirks:prefer_hdr", "Prefer HDR mode.", 0, {.min = 0, .max = 2, .map = OptionMap{{"disable", 0}, {"enable", 1}, {"gamescope_only", 2}}}),
-        MS<Bool>("quirks:skip_non_kms_dmabuf_formats", "Do not report dmabuf formats which cannot be imported into KMS", true),
+        MS<Bool>("quirks:skip_non_kms_dmabuf_formats", "Do not report dmabuf formats which cannot be imported into KMS", false),
     };
 
 #undef MS

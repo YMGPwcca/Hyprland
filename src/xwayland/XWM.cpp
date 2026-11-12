@@ -18,6 +18,7 @@
 #include "../managers/eventLoop/EventLoopManager.hpp"
 #include "../managers/SeatManager.hpp"
 #include "../helpers/env/Env.hpp"
+#include "../helpers/string/StringUtils.hpp"
 #include "../protocols/XWaylandShell.hpp"
 #include "../protocols/core/Compositor.hpp"
 #include "../desktop/state/FocusState.hpp"
@@ -224,6 +225,7 @@ void CXWM::readProp(SP<CXWaylandSurface> XSURF, uint32_t atom, xcb_get_property_
 
         if (!XSURF->m_state.appid.empty())
             XSURF->m_state.appid.pop_back();
+        StringUtils::truncUTF8InPlace(XSURF->m_state.appid);
         XSURF->m_events.metadataChanged.emit();
     };
 
@@ -232,9 +234,10 @@ void CXWM::readProp(SP<CXWaylandSurface> XSURF, uint32_t atom, xcb_get_property_
 
         if (reply->type == XCB_ATOM_NONE)
             cachedName.reset();
-        else if (reply->type == HYPRATOMS["UTF8_STRING"] || reply->type == HYPRATOMS["TEXT"] || reply->type == XCB_ATOM_STRING)
+        else if (reply->type == HYPRATOMS["UTF8_STRING"] || reply->type == HYPRATOMS["TEXT"] || reply->type == XCB_ATOM_STRING) {
             cachedName = std::string{value, valueLen};
-        else
+            StringUtils::truncUTF8InPlace(*cachedName);
+        } else
             return;
 
         XSURF->m_state.title = XSURF->m_netWmName.value_or(XSURF->m_wmName.value_or(""));
@@ -259,6 +262,12 @@ void CXWM::readProp(SP<CXWaylandSurface> XSURF, uint32_t atom, xcb_get_property_
             XSURF->m_hints.reset();
             return;
         }
+
+        // Shoutout mongoloid idiots writing Xorg for this thing and I can't even submit a patch
+        // because hurr durr you are hitler you said a bad word in 2022 you must be publicly
+        // executed waaaah
+        if (reply->value_len > XCB_ICCCM_NUM_WM_HINTS_ELEMENTS)
+            return;
 
         auto hints = makeUnique<xcb_icccm_wm_hints_t>();
         if (!xcb_icccm_get_wm_hints_from_reply(hints.get(), reply))
@@ -431,7 +440,8 @@ void CXWM::handleClientMessage(xcb_client_message_event_t* e) {
 
     } else if (e->type == HYPRATOMS["_NET_WM_STATE"]) {
         if (e->format == 32) {
-            uint32_t action = e->data.data32[0];
+            uint32_t action           = e->data.data32[0];
+            bool     demandsAttention = false;
             for (size_t i = 0; i < 2; ++i) {
                 xcb_atom_t prop = e->data.data32[1 + i];
 
@@ -457,7 +467,12 @@ void CXWM::handleClientMessage(xcb_client_message_event_t* e) {
                     XSURF->m_state.requestsMinimize = updateState(action, XSURF->m_minimized);
                 if (prop == HYPRATOMS["_NET_WM_STATE_MAXIMIZED_VERT"] || prop == HYPRATOMS["_NET_WM_STATE_MAXIMIZED_HORZ"])
                     XSURF->m_state.requestsMaximize = updateState(action, XSURF->m_maximized);
+                if (prop == HYPRATOMS["_NET_WM_STATE_DEMANDS_ATTENTION"] && updateState(action, false))
+                    demandsAttention = true;
             }
+
+            if (demandsAttention)
+                XSURF->m_events.activate.emit();
 
             XSURF->m_events.stateChanged.emit();
         }
@@ -1037,9 +1052,19 @@ CXWM::CXWM() : m_connection(makeUnique<CXCBConnection>(g_pXWayland->m_server->m_
     xcb_composite_redirect_subwindows(getConnection(), m_screen->root, XCB_COMPOSITE_REDIRECT_MANUAL);
 
     xcb_atom_t supported[] = {
-        HYPRATOMS["_NET_WM_STATE"],        HYPRATOMS["_NET_ACTIVE_WINDOW"],       HYPRATOMS["_NET_WM_MOVERESIZE"],           HYPRATOMS["_NET_WM_STATE_FOCUSED"],
-        HYPRATOMS["_NET_WM_STATE_MODAL"],  HYPRATOMS["_NET_WM_STATE_FULLSCREEN"], HYPRATOMS["_NET_WM_STATE_MAXIMIZED_VERT"], HYPRATOMS["_NET_WM_STATE_MAXIMIZED_HORZ"],
-        HYPRATOMS["_NET_WM_STATE_HIDDEN"], HYPRATOMS["_NET_CLIENT_LIST"],         HYPRATOMS["_NET_CLIENT_LIST_STACKING"],    HYPRATOMS["_NET_WORKAREA"],
+        HYPRATOMS["_NET_WM_STATE"],
+        HYPRATOMS["_NET_ACTIVE_WINDOW"],
+        HYPRATOMS["_NET_WM_MOVERESIZE"],
+        HYPRATOMS["_NET_WM_STATE_FOCUSED"],
+        HYPRATOMS["_NET_WM_STATE_MODAL"],
+        HYPRATOMS["_NET_WM_STATE_FULLSCREEN"],
+        HYPRATOMS["_NET_WM_STATE_MAXIMIZED_VERT"],
+        HYPRATOMS["_NET_WM_STATE_MAXIMIZED_HORZ"],
+        HYPRATOMS["_NET_WM_STATE_HIDDEN"],
+        HYPRATOMS["_NET_CLIENT_LIST"],
+        HYPRATOMS["_NET_CLIENT_LIST_STACKING"],
+        HYPRATOMS["_NET_WORKAREA"],
+        HYPRATOMS["_NET_WM_STATE_DEMANDS_ATTENTION"],
     };
     xcb_change_property(getConnection(), XCB_PROP_MODE_REPLACE, m_screen->root, HYPRATOMS["_NET_SUPPORTED"], XCB_ATOM_ATOM, 32, sizeof(supported) / sizeof(*supported), supported);
 
@@ -1553,6 +1578,10 @@ bool SXSelection::sendData(xcb_selection_request_event_t* e, std::string mime) {
         LOG(Log::ERR, "[xwm] sendData: no selection source available");
         return false;
     }
+
+    // Never reflect an imported X11 clipboard back into the same X server.
+    if ((this == &g_pXWayland->m_wm->m_clipboard || this == &g_pXWayland->m_wm->m_primarySelection) && selection->type() == DATA_SOURCE_TYPE_X11)
+        return false;
 
     const auto MIMES = selection->mimes();
 

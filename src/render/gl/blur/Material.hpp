@@ -20,17 +20,20 @@ namespace Render::GL {
         float               strength = 1.F;
     };
 
+    SP<ITexture> materialTexture(const SP<IFramebuffer>& framebuffer);
+
     class IGLBlurMaterial {
       public:
         virtual ~IGLBlurMaterial() = default;
 
         virtual eBlurType                 type() const noexcept         = 0;
         virtual SBlurMaterialRequirements requirements() const noexcept = 0;
-        virtual bool                      isAnimated() const noexcept;
+        virtual bool                      isAnimated(CRenderContext& ctx) const noexcept;
         virtual int64_t                   blurSizeForDamage(int64_t size) const;
         virtual float                     sampleRadius() const;
-        virtual void                      prepare(const SBlurMaterialContext& context);
-        virtual void                      bindFinish(WP<CShader> shader, const SBlurMaterialContext& context) const;
+        void                              prepareForFrame(CRenderContext& ctx, const SBlurMaterialContext& context);
+        virtual void                      prepare(CRenderContext& ctx, const SBlurMaterialContext& context);
+        virtual void                      bindFinish(CRenderContext& ctx, WP<CShader> shader, const SBlurMaterialContext& context) const;
 
       protected:
         IGLBlurMaterial() = default;

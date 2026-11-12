@@ -170,6 +170,7 @@ void CGroup::add(PHLWINDOW w, std::optional<size_t> index) {
     }
 
     m_target->recalc();
+    g_pInputManager->sendMotionEventsToFocused();
 }
 
 void CGroup::replaceMember(PHLWINDOW oldWindow, PHLWINDOW newWindow, std::optional<Fullscreen::eFullscreenMode> internalMode, bool layoutManaged) {
@@ -466,7 +467,7 @@ void CGroup::updateWorkspace(PHLWORKSPACE ws) {
         w->moveToWorkspace(ws);
         w->updateToplevel();
         w->presentation().updateDecorations();
-        w->windowTarget()->setSpaceGhost(ws->m_space);
+        w->windowTarget()->setSpaceGhost(ws->space());
     }
 }
 

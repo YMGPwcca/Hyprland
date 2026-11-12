@@ -24,6 +24,7 @@
 #include "./pass/TextureMatteElement.hpp"
 #include "./pass/TransformedWindowPassElement.hpp"
 #include "types.hpp"
+#include "Context.hpp"
 #include "../output/Monitor.hpp"
 #include "../desktop/state/Fadeout.hpp"
 #include "../desktop/view/LayerSurface.hpp"
@@ -39,7 +40,6 @@
 #include <hyprgraphics/resource/resources/TextResource.hpp>
 
 struct SMonitorRule;
-class CWorkspace;
 class CInputPopup;
 class IHLBuffer;
 class CEventLoopTimer;
@@ -59,6 +59,24 @@ namespace Render {
 
     class IElementRenderer;
     class CRenderPass;
+    class CMonitorScene;
+    class IHyprRenderer;
+    enum class eSceneMode : uint8_t;
+
+    class CTempFramebufferScope {
+      public:
+        CTempFramebufferScope(IHyprRenderer& renderer, CRenderContext& ctx, SP<IFramebuffer> fb);
+        ~CTempFramebufferScope();
+        CTempFramebufferScope(const CTempFramebufferScope&)            = delete;
+        CTempFramebufferScope& operator=(const CTempFramebufferScope&) = delete;
+
+      private:
+        IHyprRenderer&               m_renderer;
+        CRenderContext&              m_ctx;
+        SP<IFramebuffer>             m_oldFB;
+        bool                         m_hasBackend = false;
+        GL::CFramebufferBindingGuard m_bindings;
+    };
 
     class IHyprRenderer {
       public:
@@ -70,55 +88,57 @@ namespace Render {
             RT_VK = 2,
         };
 
-        virtual eType                       type() = 0;
-        WP<Render::GL::CHyprOpenGLImpl>     glBackend();
+        virtual eType                   type() = 0;
+        WP<Render::GL::CHyprOpenGLImpl> glBackend();
 
-        void                                renderMonitor(PHLMONITOR pMonitor, bool commit = true);
-        void                                arrangeLayersForMonitor(const MONITORID&);
-        void                                damageSurface(SP<CWLSurfaceResource>, double, double, double scale = 1.0);
-        void                                damageWindow(PHLWINDOW, bool forceFull = false);
-        void                                damageBox(const CBox&, bool skipFrameSchedule = false);
-        void                                damageBox(const int& x, const int& y, const int& w, const int& h);
-        void                                damageRegion(const CRegion&);
-        void                                damageMonitor(PHLMONITOR);
-        void                                damageMirrorsWith(PHLMONITOR, const CRegion&);
-        bool                                shouldRenderWindow(PHLWINDOW, PHLMONITOR);
-        bool                                shouldRenderWindow(PHLWINDOW);
-        bool                                shouldRenderMonitor(PHLMONITOR);
-        void                                ensureCursorRenderingMode();
-        bool                                shouldRenderCursor();
-        void                                setCursorHidden(bool hide);
+        void                            renderMonitor(PHLMONITOR pMonitor, bool commit = true);
+        void                            arrangeLayersForMonitor(const MONITORID&);
+        void                            damageSurface(SP<CWLSurfaceResource>, double, double, double scale = 1.0);
+        void                            damageWindow(PHLWINDOW, bool forceFull = false);
+        void                            damageBox(const CBox&, bool skipFrameSchedule = false);
+        void                            damageBox(const int& x, const int& y, const int& w, const int& h);
+        void                            damageRegion(const CRegion&);
+        void                            damageMonitor(PHLMONITOR);
+        void                            damageMirrorsWith(PHLMONITOR, const CRegion&);
+        bool                            shouldRenderWindow(PHLWINDOW, PHLMONITOR);
+        bool                            shouldRenderWindow(PHLWINDOW);
+        bool                            shouldRenderMonitor(PHLMONITOR);
+        void                            ensureCursorRenderingMode();
+        bool                            shouldRenderCursor();
+        void                            setCursorHidden(bool hide);
 
-        std::tuple<float, float, float>     getRenderTimes(PHLMONITOR pMonitor); // avg max min
-        void                                ensureLockTexturesRendered(bool load);
-        void                                renderLockscreen(PHLMONITOR pMonitor, const Time::steady_tp& now, const CBox& geometry);
-        void                                setCursorSurface(SP<Desktop::View::CWLSurface> surf, int hotspotX, int hotspotY, bool force = false);
-        void                                setCursorFromName(const std::string& name, bool force = false);
-        void                                onRenderbufferDestroy(IRenderbuffer* rb);
-        bool                                isNvidia();
-        bool                                isIntel();
-        bool                                isSoftware();
-        bool                                isMgpu();
-        void                                addWindowToRenderUnfocused(PHLWINDOW window);
-        SP<IFramebuffer>                    makeSnapshotFB(PHLWINDOW);
-        SP<IFramebuffer>                    makeSnapshotFB(PHLLS);
-        SP<IFramebuffer>                    makeSnapshotFB(WP<Desktop::View::CPopup>);
-        void                                renderFadeouts(PHLMONITOR monitor, Desktop::eFadeoutPlane plane, PHLWORKSPACE workspace = nullptr);
-        bool                                beginFullFakeRender(PHLMONITOR pMonitor, CRegion& damage, SP<IFramebuffer> fb);
-        bool                                beginRenderToBuffer(PHLMONITOR pMonitor, CRegion& damage, SP<IHLBuffer> buffer, bool simple = false);
-        virtual void                        startRenderPass() {};
-        virtual void                        endRender(const std::function<void()>& renderingDoneCallback = {}) = 0;
+        std::tuple<float, float, float> getRenderTimes(PHLMONITOR pMonitor); // avg max min
+        void                            ensureLockTexturesRendered(bool load);
+        void                            renderLockscreen(CRenderContext& ctx, PHLMONITOR pMonitor, const Time::steady_tp& now, const CBox& geometry);
+        void                            setCursorSurface(SP<Desktop::View::CWLSurface> surf, int hotspotX, int hotspotY, bool force = false);
+        void                            setCursorFromName(const std::string& name, bool force = false);
+        void                            onRenderbufferDestroy(IRenderbuffer* rb);
+        bool                            isNvidia();
+        bool                            isIntel();
+        bool                            isSoftware();
+        bool                            isMgpu();
+        void                            addWindowToRenderUnfocused(PHLWINDOW window);
+        SP<IFramebuffer>                makeSnapshotFB(PHLWINDOW);
+        SP<IFramebuffer>                makeSnapshotFB(PHLWINDOW, eSceneMode mode);
+        SP<IFramebuffer>                makeSnapshotFB(PHLLS);
+        SP<IFramebuffer>                makeSnapshotFB(WP<Desktop::View::CPopup>);
+        SP<IFramebuffer>                makeSnapshotFB(WP<Desktop::View::CPopup>, eSceneMode mode);
+        void                            renderFadeouts(CRenderContext& ctx, PHLMONITOR monitor, Desktop::eFadeoutPlane plane, PHLWORKSPACE workspace = nullptr);
+        bool                            beginFullFakeRender(PHLMONITOR pMonitor, CRegion& damage, SP<IFramebuffer> fb);
+        bool                            beginRenderToBuffer(PHLMONITOR pMonitor, CRegion& damage, SP<IHLBuffer> buffer, bool simple = false);
+        virtual void                    startRenderPass(CRenderContext& ctx) {
+            ;
+        };
+        virtual SRenderResult               endRender(const std::function<void()>& renderingDoneCallback = {}) = 0;
+        virtual void                        abortRender();
+        CRenderContext&                     context();
 
-        NColorManagement::PImageDescription workBufferImageDescription();
-        bool                                m_bBlockSurfaceFeedback = false;
-        bool                                m_bRenderingSnapshot    = false;
+        NColorManagement::PImageDescription workBufferImageDescription(CRenderContext& ctx);
         PHLMONITORREF                       m_mostHzMonitor;
-        bool                                m_directScanoutBlocked = false;
 
         void                                setSurfaceScanoutMode(SP<CWLSurfaceResource> surface, PHLMONITOR monitor); // nullptr monitor resets
 
         void                                initiateManualCrash();
-        const SRenderData&                  renderData();
 
         bool                                m_crashingInProgress = false;
         float                               m_crashingDistort    = 0.5f;
@@ -135,150 +155,153 @@ namespace Render {
             std::string                                  name;
         } m_lastCursorData;
 
-        CRenderPass     m_renderPass;
+        static void            addPassElement(CRenderContext& ctx, UP<IPassElement>&& element);
+        static CRenderPass&    currentPass(CRenderContext& ctx);
+        static UP<CScopeGuard> redirectPass(CRenderContext& ctx, CRenderPass* pass);
 
-        void            addPassElement(UP<IPassElement>&& element);
-        CRenderPass&    currentPass();
-        UP<CScopeGuard> redirectPass(CRenderPass* pass);
+        SP<ITexture> renderSplash(const std::function<SP<ITexture>(const int, const int, unsigned char* const)>& handleData, const int fontSize, const int maxWidth = 1024,
+                                  const int maxHeight = 1024);
+        CHyprColor   getConvertedColor(CRenderContext& ctx, const CHyprColor& color);
 
-        SP<ITexture>    renderSplash(const std::function<SP<ITexture>(const int, const int, unsigned char* const)>& handleData, const int fontSize, const int maxWidth = 1024,
-                                     const int maxHeight = 1024);
-        CHyprColor      getConvertedColor(const CHyprColor& color);
+        virtual SP<IRenderbuffer> getOrCreateRenderbuffer(SP<Aquamarine::IBuffer> buffer,
+                                                          uint32_t                fmt); // TODO? move to protected and fix CPointerManager::renderHWCursorBuffer
+        bool                      commitPendingAndDoExplicitSync(PHLMONITOR pMonitor, std::optional<Monitor::CDamageRing::CTransaction> damage = std::nullopt,
+                                                                 const CRegion& renderedDamage = {}); // TODO? move to protected and fix CMonitorFrameScheduler::onPresented
+        SP<ITexture>              m_screencopyDeniedTexture;                                          // TODO? make readonly
+        uint                      m_failedAssetsNo     = 0;                                           // TODO? make readonly
+        bool                      m_reloadScreenShader = true;                                        // at launch it can be set
+        CTimer                    m_globalTimer;
 
-        virtual SP<IRenderbuffer>    getOrCreateRenderbuffer(SP<Aquamarine::IBuffer> buffer,
-                                                             uint32_t                fmt); // TODO? move to protected and fix CPointerManager::renderHWCursorBuffer
-        bool                         commitPendingAndDoExplicitSync(PHLMONITOR pMonitor, std::optional<Monitor::CDamageRing::CTransaction> damage = std::nullopt,
-                                                                    const CRegion& renderedDamage = {}); // TODO? move to protected and fix CMonitorFrameScheduler::onPresented
-        SRenderData                  m_renderData;                                                       // TODO? move to protected and fix CRenderPass
-        SP<ITexture>                 m_screencopyDeniedTexture;                                          // TODO? make readonly
-        uint                         m_failedAssetsNo     = 0;                                           // TODO? make readonly
-        bool                         m_reloadScreenShader = true;                                        // at launch it can be set
-        CTimer                       m_globalTimer;
+        void                      draw(CRenderContext& ctx, WP<IPassElement> element, const CRegion& damage = {});
+        void                      draw(CRenderContext& ctx, const CBorderPassElement::SBorderData& data, const CRegion& damage = {});
+        void                      draw(CRenderContext& ctx, const CClearPassElement::SClearData& data, const CRegion& damage = {});
+        void                      draw(CRenderContext& ctx, const CFramebufferElement::SFramebufferElementData& data, const CRegion& damage = {});
+        void                      draw(CRenderContext& ctx, const CRectPassElement::SRectData& data, const CRegion& damage = {});
+        void                      draw(CRenderContext& ctx, const CRendererHintsPassElement::SData& data, const CRegion& damage = {});
+        void                      draw(CRenderContext& ctx, const CShadowPassElement::SShadowData& data, const CRegion& damage = {});
+        void                      draw(CRenderContext& ctx, const CSurfacePassElement::SRenderData& data, const CRegion& damage = {});
+        void                      draw(CRenderContext& ctx, const CTexPassElement::SRenderData& data, const CRegion& damage = {});
+        void                      draw(CRenderContext& ctx, const CTextureMatteElement::STextureMatteData& data, const CRegion& damage = {});
+        virtual void              bindFB(CRenderContext& ctx, SP<IFramebuffer> fb);
+        // Restores currentFB and physical bindings/viewport only, not other draw state.
+        [[nodiscard]] CTempFramebufferScope bindTempFB(CRenderContext& ctx, SP<IFramebuffer> fb);
+        virtual UP<ISyncFDManager>          createSyncFDManager()                                                                                                      = 0;
+        virtual WP<IElementRenderer>        elementRenderer()                                                                                                          = 0;
+        virtual SP<ITexture>                createStencilTexture(const int width, const int height)                                                                    = 0;
+        virtual SP<ITexture>                createTexture(bool opaque = false)                                                                                         = 0;
+        virtual SP<ITexture> createTexture(uint32_t drmFormat, uint8_t* pixels, uint32_t stride, const Vector2D& size, bool keepDataCopy = false, bool opaque = false) = 0;
+        virtual SP<ITexture> createTexture(const Aquamarine::SDMABUFAttrs&, bool opaque = false)                                                                       = 0;
+        virtual SP<ITexture> createTexture(const int width, const int height, unsigned char* const)                                                                    = 0;
+        virtual SP<ITexture> createTexture(cairo_surface_t* cairo)                                                                                                     = 0;
+        virtual SP<ITexture> createTexture(std::span<const float> lut3D, size_t N)                                                                                     = 0;
+        virtual SP<ITexture> createTexture(const SP<Aquamarine::IBuffer> buffer, bool keepDataCopy = false);
+        virtual SP<ITexture> renderText(const std::string& text, CHyprColor col, int pt, bool italic = false, const std::string& fontFamily = "", int maxWidth = 0,
+                                        int weight = 400);
+        virtual SP<ITexture> renderText(Hyprgraphics::CTextResource::STextResourceData&& data);
+        SP<ITexture>         loadAsset(const std::string& filename);
+        virtual bool         shouldUseNewBlurOptimizations(CRenderContext& ctx, PHLLS pLayer, PHLWINDOW pWindow);
+        virtual bool         explicitSyncSupported()                                                                                                                         = 0;
+        virtual bool         fp16Supported()                                                                                                                                 = 0;
+        virtual std::vector<SDRMFormat> getDRMFormats()                                                                                                                      = 0;
+        virtual std::vector<uint64_t>   getDRMFormatModifiers(DRMFormat format)                                                                                              = 0;
+        virtual SP<IFramebuffer>        createFB(const std::string& name = "")                                                                                               = 0;
+        virtual void                    disableScissor()                                                                                                                     = 0;
+        virtual void                    blend(bool enabled)                                                                                                                  = 0;
+        virtual void             drawShadow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a,
+                                            const SWindowRenderPresentation& presentation)                                                                                   = 0;
+        virtual void             drawShadow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1,
+                                            const Config::CGradientValueData& grad2, float lerp, float a, const SWindowRenderPresentation& presentation)                     = 0;
+        virtual void             drawGlow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) = 0;
+        virtual void             drawGlow(CRenderContext& ctx, const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1,
+                                          const Config::CGradientValueData& grad2, float lerp, float a)                                                                      = 0;
+        virtual void             setViewport(int x, int y, int width, int height)                                                                                            = 0;
 
-        void                         draw(WP<IPassElement> element, const CRegion& damage = {});
-        void                         draw(const CBorderPassElement::SBorderData& data, const CRegion& damage = {});
-        void                         draw(const CClearPassElement::SClearData& data, const CRegion& damage = {});
-        void                         draw(const CFramebufferElement::SFramebufferElementData& data, const CRegion& damage = {});
-        void                         draw(const CRectPassElement::SRectData& data, const CRegion& damage = {});
-        void                         draw(const CRendererHintsPassElement::SData& data, const CRegion& damage = {});
-        void                         draw(const CShadowPassElement::SShadowData& data, const CRegion& damage = {});
-        void                         draw(const CSurfacePassElement::SRenderData& data, const CRegion& damage = {});
-        void                         draw(const CTexPassElement::SRenderData& data, const CRegion& damage = {});
-        void                         draw(const CTextureMatteElement::STextureMatteData& data, const CRegion& damage = {});
-        virtual void                 bindFB(SP<IFramebuffer> fb);
-        UP<CScopeGuard>              bindTempFB(SP<IFramebuffer> fb);
-        virtual UP<ISyncFDManager>   createSyncFDManager()                                                                                                                     = 0;
-        virtual WP<IElementRenderer> elementRenderer()                                                                                                                         = 0;
-        virtual SP<ITexture>         createStencilTexture(const int width, const int height)                                                                                   = 0;
-        virtual SP<ITexture>         createTexture(bool opaque = false)                                                                                                        = 0;
-        virtual SP<ITexture>         createTexture(uint32_t drmFormat, uint8_t* pixels, uint32_t stride, const Vector2D& size, bool keepDataCopy = false, bool opaque = false) = 0;
-        virtual SP<ITexture>         createTexture(const Aquamarine::SDMABUFAttrs&, bool opaque = false)                                                                       = 0;
-        virtual SP<ITexture>         createTexture(const int width, const int height, unsigned char* const)                                                                    = 0;
-        virtual SP<ITexture>         createTexture(cairo_surface_t* cairo)                                                                                                     = 0;
-        virtual SP<ITexture>         createTexture(std::span<const float> lut3D, size_t N)                                                                                     = 0;
-        virtual SP<ITexture>         createTexture(const SP<Aquamarine::IBuffer> buffer, bool keepDataCopy = false);
-        virtual SP<ITexture>         renderText(const std::string& text, CHyprColor col, int pt, bool italic = false, const std::string& fontFamily = "", int maxWidth = 0,
-                                                int weight = 400);
-        virtual SP<ITexture>         renderText(Hyprgraphics::CTextResource::STextResourceData&& data);
-        SP<ITexture>                 loadAsset(const std::string& filename);
-        virtual bool                 shouldUseNewBlurOptimizations(PHLLS pLayer, PHLWINDOW pWindow);
-        virtual bool                 explicitSyncSupported()                                                                                                     = 0;
-        virtual bool                 fp16Supported()                                                                                                             = 0;
-        virtual std::vector<SDRMFormat> getDRMFormats()                                                                                                          = 0;
-        virtual std::vector<uint64_t>   getDRMFormatModifiers(DRMFormat format)                                                                                  = 0;
-        virtual SP<IFramebuffer>        createFB(const std::string& name = "")                                                                                   = 0;
-        virtual void                    disableScissor()                                                                                                         = 0;
-        virtual void                    blend(bool enabled)                                                                                                      = 0;
-        virtual void                    drawShadow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) = 0;
-        virtual void     drawShadow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2,
-                                    float lerp, float a)                                                                                                         = 0;
-        virtual void     drawGlow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a)                  = 0;
-        virtual void     drawGlow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2,
-                                  float lerp, float a)                                                                                                           = 0;
-        virtual void     setViewport(int x, int y, int width, int height)                                                                                        = 0;
+        bool                     preBlurQueued(PHLMONITORREF pMonitor);
+        bool                     preBlurQueued(CRenderContext& ctx);
+        SP<ITexture>             getBlurTexture(CRenderContext& ctx);
+        SP<IFramebuffer>         getWorkBuffer(CRenderContext& ctx, std::optional<Vector2D> size = std::nullopt);
+        void                     sendFrameEventsToWorkspace(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now);
 
-        bool             preBlurQueued(PHLMONITORREF pMonitor);
-        void             sendFrameEventsToWorkspace(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now);
+        void                     setProjectionType(CRenderContext& ctx, const Vector2D& fbSize);
+        void                     setProjectionType(CRenderContext& ctx, eRenderProjectionType projectionType);
+        Mat3x3                   getBoxProjection(CRenderContext& ctx, const CBox& box, std::optional<eTransform> transform = std::nullopt);
+        Mat3x3                   projectBoxToTarget(CRenderContext& ctx, const CBox& box, std::optional<eTransform> transform = std::nullopt);
 
-        void             setProjectionType(const Vector2D& fbSize);
-        void             setProjectionType(eRenderProjectionType projectionType);
-        Mat3x3           getBoxProjection(const CBox& box, std::optional<eTransform> transform = std::nullopt);
-        Mat3x3           projectBoxToTarget(const CBox& box, std::optional<eTransform> transform = std::nullopt);
+        SP<IFramebuffer>         blurMainFramebuffer(CRenderContext& ctx, float strength, const CRegion& originalDamage, const Render::SBlurContext& context = {});
+        void                     beginBackdropScope(CRenderContext& ctx, SP<SBackdropScope> scope);
+        void                     endBackdropScope(CRenderContext& ctx, SP<SBackdropScope> scope);
+        virtual SP<IFramebuffer> blurFramebuffer(CRenderContext& ctx, SP<IFramebuffer> source, float strength, const CRegion& originalDamage,
+                                                 const Render::SBlurContext& context = {})       = 0;
+        virtual void             refreshBlurProvider()                                           = 0;
+        virtual void             expandBlurDamage(CRegion& damage, float multiplier = 1.F) const = 0;
+        virtual bool             blurProviderIsAnimated(CRenderContext& ctx) const               = 0;
+        virtual bool             blurProviderRequiresLiveBlur() const                            = 0;
+        void                     scheduleFrameForAnimatedBlur(CRenderContext& ctx, const CRegion& damage, bool usesPrecomputedBlur);
+        void                     preBlurForCurrentMonitor(CRenderContext& ctx, const CRegion& fakeDamage);
 
-        SP<IFramebuffer> blurMainFramebuffer(float strength, const CRegion& originalDamage, const Render::SBlurContext& context = {});
-        void             beginBackdropScope(SP<SBackdropScope> scope);
-        void             endBackdropScope(SP<SBackdropScope> scope);
-        virtual SP<IFramebuffer> blurFramebuffer(SP<IFramebuffer> source, float strength, const CRegion& originalDamage, const Render::SBlurContext& context = {}) = 0;
-        virtual void             refreshBlurProvider()                                                                                                             = 0;
-        virtual void             expandBlurDamage(CRegion& damage, float multiplier = 1.F) const                                                                   = 0;
-        virtual bool             blurProviderIsAnimated() const                                                                                                    = 0;
-        virtual bool             blurProviderRequiresLiveBlur() const                                                                                              = 0;
-        void                     scheduleFrameForAnimatedBlur(const CRegion& damage, bool usesPrecomputedBlur);
-        void                     preBlurForCurrentMonitor(const CRegion& fakeDamage);
-
-        SCMSettings              getCMSettings(const NColorManagement::PImageDescription imageDescription, const NColorManagement::PImageDescription targetImageDescription,
-                                               SP<CWLSurfaceResource> surface = nullptr, bool modifySDR = false, float sdrMinLuminance = -1.0f, int sdrMaxLuminance = -1,
-                                               bool shouldUseSurface = false);
-        void                     clearCMSettingsCache();
-        virtual bool             reloadShaders(const std::string& path = "") = 0;
+        SCMSettings getCMSettings(CRenderContext& ctx, const NColorManagement::PImageDescription imageDescription, const NColorManagement::PImageDescription targetImageDescription,
+                                  SP<CWLSurfaceResource> surface = nullptr, bool modifySDR = false, float sdrMinLuminance = -1.0f, int sdrMaxLuminance = -1,
+                                  bool shouldUseSurface = false);
+        void        clearCMSettingsCache(CRenderContext& ctx);
+        virtual bool reloadShaders(const std::string& path = "") = 0;
 
       protected:
-        virtual void              renderOffToMain(SP<IFramebuffer> off)                                         = 0;
+        CRenderContext            m_context;
+        void                      finishRender();
+        virtual void              renderOffToMain(CRenderContext& ctx, SP<IFramebuffer> off)                    = 0;
         virtual SP<IRenderbuffer> getOrCreateRenderbufferInternal(SP<Aquamarine::IBuffer> buffer, uint32_t fmt) = 0;
-        void                      renderMirrored();
-        void                      setDamage(const CRegion& damage_, std::optional<CRegion> finalDamage);
+        void                      renderMirrored(CRenderContext& ctx);
+        void                      setDamage(CRenderContext& ctx, const CRegion& damage_, std::optional<CRegion> finalDamage);
         // if RENDER_MODE_NORMAL, provided damage will be written to.
         // otherwise, it will be the one used.
         bool beginRender(PHLMONITOR pMonitor, CRegion& damage, eRenderMode mode = RENDER_MODE_NORMAL, SP<IHLBuffer> buffer = {}, SP<IFramebuffer> fb = nullptr, bool simple = false,
-                         std::optional<Monitor::CDamageRing::CTransaction>* damageTransaction = nullptr);
+                         const SRenderOptions& options = {}, std::optional<Monitor::CDamageRing::CTransaction>* damageTransaction = nullptr);
 
-        virtual bool beginRenderInternal(PHLMONITOR pMonitor, CRegion& damage, bool simple = false) {
+        virtual bool beginRenderInternal(CRenderContext& ctx, PHLMONITOR pMonitor, CRegion& damage, bool simple = false) {
             return false;
         };
-        virtual bool beginFullFakeRenderInternal(PHLMONITOR pMonitor, CRegion& damage, SP<IFramebuffer> fb, bool simple = false) {
+        virtual bool beginFullFakeRenderInternal(CRenderContext& ctx, PHLMONITOR pMonitor, CRegion& damage, SP<IFramebuffer> fb, bool simple = false) {
             return false;
         };
         virtual void initRender() {};
-        virtual bool initRenderBuffer(SP<Aquamarine::IBuffer> buffer, uint32_t fmt) {
+        virtual bool initRenderBuffer(CRenderContext& ctx, SP<Aquamarine::IBuffer> buffer, uint32_t fmt) {
             return false;
         };
 
-        SP<ITexture>         getBackground(PHLMONITOR pMonitor);
+        SP<ITexture>         getBackground(CRenderContext& ctx, PHLMONITOR pMonitor);
         virtual SP<ITexture> getBlurTexture(PHLMONITORREF pMonitor);
 
-        struct SCMSettingsCacheEntry {
-            uint64_t    srcDescId = 0, dstDescId = 0;
-            void*       surfacePtr      = nullptr; // read-only!!
-            bool        modifySDR       = false;
-            float       sdrMinLuminance = -1.F;
-            int         sdrMaxLuminance = -1;
-            SCMSettings settings;
-        };
-        std::vector<SCMSettingsCacheEntry> m_cmSettingsCache;
+        SP<ITexture>         m_lockDeadTexture;
+        SP<ITexture>         m_lockDead2Texture;
+        SP<ITexture>         m_lockDead3Texture;
+        SP<ITexture>         m_lockTtyTextTexture;
 
-        SP<ITexture>                       m_lockDeadTexture;
-        SP<ITexture>                       m_lockDead2Texture;
-        SP<ITexture>                       m_lockDead3Texture;
-        SP<ITexture>                       m_lockTtyTextTexture;
-        CRenderPass*                       m_currentPass = nullptr;
-
-        void                               handleFullscreenSettings(PHLMONITOR pMonitor);
+        void                 handleFullscreenSettings(PHLMONITOR pMonitor);
 
         // old private:
         void arrangeLayerArray(PHLMONITOR, const std::vector<PHLLSREF>&, bool, CBox*);
-        void renderWorkspace(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry);
-        void renderIME(PHLMONITOR pMonitor, const Time::steady_tp& now, const CBox& geometry);
-        void renderWorkspaceWindowsFullscreen(PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&); // renders workspace windows (fullscreen) (tiled, floating, pinned, but no special)
-        void renderWorkspaceWindows(PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&); // renders workspace windows (no fullscreen) (tiled, floating, pinned, but no special)
-        void renderAllClientsForWorkspace(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const Vector2D& translate = {0, 0}, const float& scale = 1.f);
-        void renderWindow(PHLWINDOW, PHLMONITOR, const Time::steady_tp&, bool, eRenderPassMode, bool ignorePosition = false, bool standalone = false);
-        void renderLayer(PHLLS, PHLMONITOR, const Time::steady_tp&, bool popups = false, bool lockscreen = false);
-        void renderSessionLockSurface(WP<SSessionLockSurface>, PHLMONITOR, const Time::steady_tp&);
-        void renderDragIcon(PHLMONITOR, const Time::steady_tp&);
-        void renderIMEPopup(CInputPopup*, PHLMONITOR, const Time::steady_tp&);
-        void renderSessionLockPrimer(PHLMONITOR pMonitor);
-        void renderSessionLockMissing(PHLMONITOR pMonitor);
-        void renderBackground(PHLMONITOR pMonitor);
+        void renderWorkspace(CRenderContext& ctx, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry);
+        void renderWorkspace(CRenderContext& ctx, PHLWORKSPACE workspace, const Time::steady_tp& now, eSceneMode mode);
+        void renderIME(CRenderContext& ctx, PHLMONITOR pMonitor, const Time::steady_tp& now, const CBox& geometry);
+        void renderWorkspaceWindowsFullscreen(CRenderContext& ctx, PHLMONITOR, PHLWORKSPACE,
+                                              const Time::steady_tp&); // renders workspace windows (fullscreen) (tiled, floating, pinned, but no special)
+        void renderWorkspaceWindowsFullscreen(CRenderContext& ctx, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, eSceneMode);
+        void renderWorkspaceWindows(CRenderContext& ctx, PHLMONITOR, PHLWORKSPACE,
+                                    const Time::steady_tp&); // renders workspace windows (no fullscreen) (tiled, floating, pinned, but no special)
+        void renderWorkspaceWindows(CRenderContext& ctx, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, eSceneMode);
+        void renderAllClientsForWorkspace(CRenderContext& ctx, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const Vector2D& translate = {0, 0},
+                                          const float& scale = 1.f);
+        void renderAllClientsForWorkspace(CRenderContext& ctx, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, eSceneMode mode,
+                                          const Vector2D& translate = {0, 0}, const float& scale = 1.f);
+        void renderWindow(CRenderContext& ctx, PHLWINDOW, PHLMONITOR, const SWindowRenderPresentation&, const Time::steady_tp&, bool, eRenderPassMode, bool ignorePosition = false,
+                          bool standalone = false);
+        void renderLayer(CRenderContext& ctx, PHLLS, PHLMONITOR, const Time::steady_tp&, bool popups = false, bool lockscreen = false, bool workspaceScene = false);
+        void renderSessionLockSurface(CRenderContext& ctx, WP<SSessionLockSurface>, PHLMONITOR, const Time::steady_tp&);
+        void renderDragIcon(CRenderContext& ctx, PHLMONITOR, const Time::steady_tp&);
+        void renderIMEPopup(CRenderContext& ctx, CInputPopup*, PHLMONITOR, const Time::steady_tp&);
+        void renderSessionLockPrimer(CRenderContext& ctx, PHLMONITOR pMonitor);
+        void renderSessionLockMissing(CRenderContext& ctx, PHLMONITOR pMonitor);
+        void renderBackground(CRenderContext& ctx, PHLMONITOR pMonitor);
         void requestBackgroundResource();
         std::string                       resolveAssetPath(const std::string& file);
         void                              initMissingAssetTexture();
@@ -290,8 +313,6 @@ namespace Render {
         bool                              m_cursorHidden            = false;
         bool                              m_cursorHiddenByCondition = false;
         bool                              m_cursorHasSurface        = false;
-        SP<Aquamarine::IBuffer>           m_currentBuffer           = nullptr;
-        eRenderMode                       m_renderMode              = RENDER_MODE_NORMAL;
         bool                              m_nvidia                  = false;
         bool                              m_intel                   = false;
         bool                              m_software                = false;
@@ -308,13 +329,6 @@ namespace Render {
         std::vector<PHLWINDOWREF>      m_renderUnfocused;
         SP<CEventLoopTimer>            m_renderUnfocusedTimer;
 
-        struct SBackdropCapture {
-            SP<SBackdropScope> scope;
-            SP<IFramebuffer>   framebuffer;
-        };
-
-        std::vector<SBackdropCapture> m_backdropCaptures;
-
         friend class CRenderPass;
         friend class Render::GL::CHyprOpenGLImpl;
         friend class CToplevelExportFrame;
@@ -323,10 +337,16 @@ namespace Render {
         friend class Pointer::CPointerManager;
         friend class Monitor::CMonitor;
         friend class CMonitorFrameScheduler;
+        friend class CMonitorScene;
 
       private:
-        void bindOffMain();
-        void bindBackOnMain();
+        bool m_renderingMonitor = false;
+
+        bool shouldRenderWindowInScene(PHLWINDOW window, PHLMONITOR monitor, PHLWORKSPACE workspace, eSceneMode mode);
+        void renderMonitorBackground(CRenderContext& ctx, PHLMONITOR pMonitor, const Time::steady_tp& time, PHLWORKSPACE workspace, eSceneMode mode);
+        void renderFadeouts(CRenderContext& ctx, PHLMONITOR monitor, Desktop::eFadeoutPlane plane, PHLWORKSPACE workspace, eSceneMode mode);
+        bool bindOffMain(CRenderContext& ctx);
+        void bindBackOnMain(CRenderContext& ctx);
     };
 
 }

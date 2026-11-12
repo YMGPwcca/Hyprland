@@ -22,7 +22,15 @@ CSessionLockSurface::CSessionLockSurface(SP<CExtSessionLockSurfaceV1> resource_,
         PROTO::sessionLock->destroyResource(this);
     });
 
-    m_resource->setAckConfigure([this](CExtSessionLockSurfaceV1* r, uint32_t serial) { m_ackdConfigure = true; });
+    // Keep the resource destroyable if the output disappeared while the request was in flight.
+    if (!m_monitor)
+        return;
+
+    m_resource->setAckConfigure([this](CExtSessionLockSurfaceV1* r, uint32_t serial) {
+        m_ackdConfigure = true;
+        if (m_surface)
+            m_surface->m_pending.updated.bits.sessionLock = true;
+    });
 
     m_listeners.surfaceCommit = m_surface->m_events.commit.listen([this] {
         if (!m_surface->m_current.texture) {
@@ -209,11 +217,7 @@ void CSessionLockProtocol::onGetLockSurface(CExtSessionLockV1* lock, uint32_t id
         LOG(Log::ERR, "onGetLockSurface: invalid output resource");
         return;
     }
-    auto PMONITOR = OUTPUTRES->m_monitor.lock();
-    if (!PMONITOR) {
-        LOG(Log::ERR, "onGetLockSurface: monitor is gone for output resource");
-        return;
-    }
+    auto             PMONITOR = OUTPUTRES->m_monitor.lock();
 
     SP<CSessionLock> sessionLock;
     for (auto const& l : m_locks) {
@@ -231,6 +235,9 @@ void CSessionLockProtocol::onGetLockSurface(CExtSessionLockV1* lock, uint32_t id
         m_lockSurfaces.pop_back();
         return;
     }
+
+    if (!PMONITOR)
+        return;
 
     sessionLock->m_events.newLockSurface.emit(RESOURCE);
 }

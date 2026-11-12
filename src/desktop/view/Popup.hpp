@@ -48,8 +48,10 @@ namespace Desktop::View {
         virtual Types::CMultiAVarContainer<float, uint8_t>&       alpha() override;
         virtual const Types::CMultiAVarContainer<float, uint8_t>& alpha() const override;
         virtual std::optional<uint8_t>                            alphaGenericToKey(eAlphaModifiableProp p) override;
+        virtual bool                                              cantLockCursor() const override;
 
         SP<Desktop::View::CWLSurface>                             getT1Owner() const;
+        PHLWINDOW                                                 windowOwner() const;
         PHLLS                                                     layerOwner() const;
         Vector2D                                                  coordsRelativeToParent() const;
         Vector2D                                                  coordsGlobal() const;

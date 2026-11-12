@@ -11,6 +11,7 @@
 #include "types/GeometricMovableAnimated.hpp"
 #include "types/AlphaModifiable.hpp"
 #include "surfaceTree/PopupOwner.hpp"
+#include "surfaceTree/SubsurfaceOwner.hpp"
 #include "animationControllers/LayerSurfaceAnimationController.hpp"
 
 class CLayerShellResource;
@@ -24,15 +25,20 @@ namespace Desktop::View {
     };
 
     enum class eLayerFlags : uint8_t {
-        LAYER_FLAG_NONE             = 0,
-        LAYER_FLAG_DEAD             = (1 << 0),
+        LAYER_FLAG_NONE = 0,
+        LAYER_FLAG_DEAD = (1 << 0),
+        // is the layer present, or allowed to be, above fullscreen (FSMODE_FULLSCREEN) window
         LAYER_FLAG_ABOVE_FULLSCREEN = (1 << 1),
     };
 
     using enum eLayerFlags;
     EXPOSE_ENUM_AS_MASK(eLayerFlags, LayerFlags);
 
-    class CLayerSurface : public virtual IView, public virtual CGeometricMovableAnimated, public virtual IAlphaModifiable, public virtual CPopupOwner {
+    class CLayerSurface : public virtual IView,
+                          public virtual CGeometricMovableAnimated,
+                          public virtual IAlphaModifiable,
+                          public virtual CPopupOwner,
+                          public virtual CSubsurfaceOwner {
       public:
         static PHLLS create(SP<CLayerShellResource>);
         static PHLLS fromView(SP<IView>);
@@ -52,11 +58,13 @@ namespace Desktop::View {
         virtual Types::CMultiAVarContainer<float, uint8_t>&       alpha() override;
         virtual const Types::CMultiAVarContainer<float, uint8_t>& alpha() const override;
         virtual std::optional<uint8_t>                            alphaGenericToKey(eAlphaModifiableProp p) override;
+        virtual bool                                              cantLockCursor() const override;
 
         WP<CLayerShellResource>                                   m_layerSurface;
         bool                                                      shouldBlur() const;
+        bool                                                      isHiddenByFullscreen(const PHLMONITOR& monitor) const;
 
-        LayerFlags                                                m_flags = LAYER_FLAG_ABOVE_FULLSCREEN;
+        LayerFlags                                                m_flags = LAYER_FLAG_NONE;
 
         // the header providing the enum type cannot be imported here
         int                                     m_keyboardInteractivity = 0;
@@ -95,6 +103,7 @@ namespace Desktop::View {
         } m_listeners;
 
         void registerCallbacks();
+        void takeKeyboardFocus();
 
         // fade in/out
         Desktop::Types::CMultiAVarContainer<float, std::underlying_type_t<eLayerAlpha>> m_alpha;

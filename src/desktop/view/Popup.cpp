@@ -13,6 +13,7 @@
 #include "../../managers/input/InputManager.hpp"
 #include "../../managers/eventLoop/EventLoopManager.hpp"
 #include "../../render/Renderer.hpp"
+#include "../../render/scene/SceneSelection.hpp"
 #include "../../render/OpenGL.hpp"
 #include "../../output/Monitor.hpp"
 #include "../../state/MonitorState.hpp"
@@ -266,14 +267,15 @@ void CPopup::onUnmap() {
 
     m_lastSize = MAX_DAMAGE_SIZE;
 
-    const auto SNAPSHOT    = g_pHyprRenderer->makeSnapshotFB(m_self);
-    const auto SOURCEALPHA = m_alpha.get(POPUP_ALPHA_FADE)->value();
+    const auto SNAPSHOT           = g_pHyprRenderer->makeSnapshotFB(m_self);
+    const auto WORKSPACE_SNAPSHOT = g_pHyprRenderer->makeSnapshotFB(m_self, Render::eSceneMode::WORKSPACE_WINDOWS);
+    const auto SOURCEALPHA        = m_alpha.get(POPUP_ALPHA_FADE)->value();
 
     m_alpha.get(POPUP_ALPHA_FADE)->setConfig(Config::animationTree()->getAnimationPropertyConfig("fadePopupsOut"));
     m_alpha.get(POPUP_ALPHA_FADE)->setValueAndWarp(1.F);
     *m_alpha.get(POPUP_ALPHA_FADE) = 0.F;
 
-    Desktop::fadingOutState()->add(CPopupFadeout::create(m_self.lock(), SNAPSHOT, SOURCEALPHA));
+    Desktop::fadingOutState()->add(CPopupFadeout::create(m_self.lock(), SNAPSHOT, SOURCEALPHA, WORKSPACE_SNAPSHOT));
 
     m_mapped = false;
 
@@ -314,7 +316,7 @@ void CPopup::onCommit(bool ignoreSiblings) {
         return;
     }
 
-    if (!m_windowOwner.expired() && (!m_windowOwner->mapped() || !m_windowOwner->m_workspace->m_visible)) {
+    if (!m_windowOwner.expired() && (!m_windowOwner->mapped() || !m_windowOwner->m_workspace->visible())) {
         const auto PREV_SIZE = m_lastSize;
         m_lastSize           = m_backend->surfaceSize();
 
@@ -384,6 +386,10 @@ SP<Desktop::View::CWLSurface> CPopup::getT1Owner() const {
         return m_windowOwner->wlSurface();
     else
         return m_layerOwner->wlSurface();
+}
+
+PHLWINDOW CPopup::windowOwner() const {
+    return m_windowOwner.lock();
 }
 
 PHLLS CPopup::layerOwner() const {
@@ -732,4 +738,15 @@ bool CPopup::shouldBlur() const {
     static CConfigValue PBLUR       = CConfigValue<Config::INTEGER>("decoration:blur:enabled");
 
     return *PBLURPOPUPS && *PBLUR;
+}
+
+bool CPopup::cantLockCursor() const {
+    if (!m_windowOwner.expired())
+        return m_windowOwner->cantLockCursor();
+    if (!m_layerOwner.expired())
+        return m_layerOwner->cantLockCursor();
+    if (m_parent)
+        return m_parent->cantLockCursor();
+
+    return false;
 }

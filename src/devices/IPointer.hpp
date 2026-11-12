@@ -14,8 +14,8 @@ class IPointer : public IHID {
   public:
     virtual uint32_t                 getCapabilities();
     virtual eHIDType                 getType();
-    virtual bool                     isVirtual() = 0;
-    virtual SP<Aquamarine::IPointer> aq()        = 0;
+    virtual bool                     isVirtual() const = 0;
+    virtual SP<Aquamarine::IPointer> aq()              = 0;
 
     struct SMotionEvent {
         uint32_t     timeMs = 0;
@@ -119,4 +119,7 @@ class IPointer : public IHID {
     std::optional<float> m_scrollFactor = {};
 
     WP<IPointer>         m_self;
+
+  protected:
+    using IHID::IHID;
 };

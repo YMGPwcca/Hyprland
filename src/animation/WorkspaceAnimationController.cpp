@@ -3,7 +3,7 @@
 #include "../Compositor.hpp"
 #include "../config/ConfigValue.hpp"
 #include "../config/shared/animation/AnimationTree.hpp"
-#include "../desktop/Workspace.hpp"
+#include "../workspace/HLWorkspace.hpp"
 #include "../desktop/state/WindowState.hpp"
 #include "../desktop/view/LayerSurface.hpp"
 #include "../desktop/view/window/Window.hpp"
@@ -26,7 +26,7 @@ void Animation::Workspace::startAnimation(PHLWORKSPACE ws, eAnimationType type, 
     const bool PRESERVE_CURRENT = preserveCurrent && !IN;
 
     if (!instant) {
-        const std::string ANIMNAME = std::format("{}{}", ws->m_isSpecialWorkspace ? "specialWorkspace" : "workspaces", IN ? "In" : "Out");
+        const std::string ANIMNAME = std::format("{}{}", ws->type() == ::Workspace::eWorkspaceType::SPECIAL ? "specialWorkspace" : "workspaces", IN ? "In" : "Out");
 
         ws->m_alpha->setConfig(Config::animationTree()->getAnimationPropertyConfig(ANIMNAME));
         ws->m_renderOffset->setConfig(Config::animationTree()->getAnimationPropertyConfig(ANIMNAME));
@@ -47,7 +47,7 @@ void Animation::Workspace::startAnimation(PHLWORKSPACE ws, eAnimationType type, 
             return;
 
         for (auto const& w : Desktop::windowState()->windows()) {
-            if (!validMapped(w) || w->workspaceID() != weak->m_id)
+            if (!validMapped(w) || w->m_workspace != weak)
                 continue;
 
             w->presentation().onWorkspaceAnimUpdate();
@@ -144,7 +144,7 @@ void Animation::Workspace::startAnimation(PHLWORKSPACE ws, eAnimationType type, 
             *ws->m_renderOffset = Vector2D(left ? -XDISTANCE : XDISTANCE, 0.0);
     }
 
-    if (ws->m_isSpecialWorkspace) {
+    if (ws->type() == ::Workspace::eWorkspaceType::SPECIAL) {
         if (IN) {
             ws->m_alpha->setValueAndWarp(0.F);
             *ws->m_alpha = 1.F;
@@ -192,13 +192,13 @@ void Animation::Workspace::setFullscreenFadeAnimation(PHLWORKSPACE ws, eAnimatio
     if (!PMONITOR)
         return;
 
-    if (ws->m_id == PMONITOR->activeWorkspaceID() || ws->m_id == PMONITOR->activeSpecialWorkspaceID()) {
+    if (ws == PMONITOR->m_activeWorkspace || ws == PMONITOR->m_activeSpecialWorkspace) {
         const auto FSWINDOW         = Fullscreen::controller()->getFullscreenWindow(ws, true);
         const auto FS_MODE_INTERNAL = FSWINDOW ? Fullscreen::controller()->getFullscreenModes(FSWINDOW).internal : Fullscreen::FSMODE_NONE;
         for (auto const& ls : PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
-            // We have an FS window - LAYER_FLAG_ABOVE_FULLSCREEN must be correctly unset in this case
+            // We have an FS window - if LAYER_FLAG_ABOVE_FULLSCREEN is set, the layer is allowed above fullscreen window (maximised too in any case)
             if (!(ls->m_flags & LAYER_FLAG_ABOVE_FULLSCREEN))
-                *ls->alpha()[LS_ALPHA_FADE] = FULLSCREEN && FS_MODE_INTERNAL != Fullscreen::FSMODE_MAXIMIZED ? 0.F : 1.F;
+                *ls->alpha()[LS_ALPHA_FADE] = (FULLSCREEN && FS_MODE_INTERNAL != Fullscreen::FSMODE_MAXIMIZED) ? 0.F : 1.F;
             else
                 *ls->alpha()[LS_ALPHA_FADE] = 1.F;
         }
@@ -235,7 +235,7 @@ void Animation::Workspace::overrideFullscreenFadeAmount(PHLWORKSPACE ws, float f
     if (!PMONITOR)
         return;
 
-    if (ws->m_id == PMONITOR->activeWorkspaceID() || ws->m_id == PMONITOR->activeSpecialWorkspaceID()) {
+    if (ws == PMONITOR->m_activeWorkspace || ws == PMONITOR->m_activeSpecialWorkspace) {
         for (auto const& ls : PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
             *ls->alpha()[LS_ALPHA_FADE] = fade;
         }

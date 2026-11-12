@@ -10,7 +10,7 @@ SP<CTouchDevice> CTouchDevice::create(SP<Aquamarine::ITouch> touch) {
     return pTouch;
 }
 
-CTouchDevice::CTouchDevice(SP<Aquamarine::ITouch> touch_) : m_touch(touch_) {
+CTouchDevice::CTouchDevice(SP<Aquamarine::ITouch> touch_) : ITouch(touch_ ? touch_->getLibinputHandle() : nullptr), m_touch(touch_) {
     if (!m_touch)
         return;
 
@@ -55,7 +55,7 @@ CTouchDevice::CTouchDevice(SP<Aquamarine::ITouch> touch_) : m_touch(touch_) {
     m_deviceName = m_touch->getName();
 }
 
-bool CTouchDevice::isVirtual() {
+bool CTouchDevice::isVirtual() const {
     return false;
 }
 

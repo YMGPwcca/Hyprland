@@ -6,6 +6,7 @@
 #include "../../view/window/WindowPresentation.hpp"
 #include "../../types/OverridableVar.hpp"
 #include "../../../event/EventBus.hpp"
+#include "../../../helpers/MiscFunctions.hpp"
 #include "desktop/rule/windowRule/WindowRuleEffectContainer.hpp"
 
 #include <string>
@@ -38,31 +39,50 @@ CWindowRuleApplicator::CWindowRuleApplicator(PHLWINDOW w) : m_window(w) {
 std::unordered_set<CWindowRuleEffectContainer::storageType> CWindowRuleApplicator::resetProps(std::underlying_type_t<eRuleProperty> props, Types::eOverridePriority prio) {
     std::unordered_set<CWindowRuleEffectContainer::storageType> effectsNuked;
 
-    std::apply(
-        [&](auto&&... prop) { (resetRuleProp(prop.first.get(), props, prio, effectsNuked, prop.second), ...); },
-        std::make_tuple(
-            std::pair{std::ref(m_alpha), [this] { return alphaEffect(); }}, std::pair{std::ref(m_alphaInactive), [this] { return alphaInactiveEffect(); }},
-            std::pair{std::ref(m_alphaFullscreen), [this] { return alphaFullscreenEffect(); }}, std::pair{std::ref(m_allowsInput), [this] { return allowsInputEffect(); }},
-            std::pair{std::ref(m_decorate), [this] { return decorateEffect(); }}, std::pair{std::ref(m_focusOnActivate), [this] { return focusOnActivateEffect(); }},
-            std::pair{std::ref(m_keepAspectRatio), [this] { return keepAspectRatioEffect(); }}, std::pair{std::ref(m_nearestNeighbor), [this] { return nearestNeighborEffect(); }},
-            std::pair{std::ref(m_noAnim), [this] { return noAnimEffect(); }}, std::pair{std::ref(m_noBlur), [this] { return noBlurEffect(); }},
-            std::pair{std::ref(m_noDim), [this] { return noDimEffect(); }}, std::pair{std::ref(m_noFocus), [this] { return noFocusEffect(); }},
-            std::pair{std::ref(m_noMaxSize), [this] { return noMaxSizeEffect(); }}, std::pair{std::ref(m_noShadow), [this] { return noShadowEffect(); }},
-            std::pair{std::ref(m_noGlow), [this] { return noGlowEffect(); }}, std::pair{std::ref(m_noWobble), [this] { return noWobbleEffect(); }},
-            std::pair{std::ref(m_noShortcutsInhibit), [this] { return noShortcutsInhibitEffect(); }}, std::pair{std::ref(m_opaque), [this] { return opaqueEffect(); }},
-            std::pair{std::ref(m_dimAround), [this] { return dimAroundEffect(); }}, std::pair{std::ref(m_RGBX), [this] { return RGBXEffect(); }},
-            std::pair{std::ref(m_syncFullscreen), [this] { return syncFullscreenEffect(); }}, std::pair{std::ref(m_tearing), [this] { return tearingEffect(); }},
-            std::pair{std::ref(m_xray), [this] { return xrayEffect(); }}, std::pair{std::ref(m_renderUnfocused), [this] { return renderUnfocusedEffect(); }},
-            std::pair{std::ref(m_noFollowMouse), [this] { return noFollowMouseEffect(); }}, std::pair{std::ref(m_noScreenShare), [this] { return noScreenShareEffect(); }},
-            std::pair{std::ref(m_noVRR), [this] { return noVRREffect(); }}, std::pair{std::ref(m_noAutoHDR), [this] { return noAutoHDREffect(); }},
-            std::pair{std::ref(m_persistentSize), [this] { return persistentSizeEffect(); }}, std::pair{std::ref(m_stayFocused), [this] { return stayFocusedEffect(); }},
-            std::pair{std::ref(m_idleInhibitMode), [this] { return idleInhibitModeEffect(); }}, std::pair{std::ref(m_confinePointer), [this] { return confinePointerEffect(); }},
-            std::pair{std::ref(m_noXdgDrags), [this] { return noXdgDragsEffect(); }}, std::pair{std::ref(m_borderSize), [this] { return borderSizeEffect(); }},
-            std::pair{std::ref(m_rounding), [this] { return roundingEffect(); }}, std::pair{std::ref(m_roundingPower), [this] { return roundingPowerEffect(); }},
-            std::pair{std::ref(m_scrollMouse), [this] { return scrollMouseEffect(); }}, std::pair{std::ref(m_scrollTouchpad), [this] { return scrollTouchpadEffect(); }},
-            std::pair{std::ref(m_animationStyle), [this] { return animationStyleEffect(); }}, std::pair{std::ref(m_maxSize), [this] { return maxSizeEffect(); }},
-            std::pair{std::ref(m_minSize), [this] { return minSizeEffect(); }}, std::pair{std::ref(m_activeBorderColor), [this] { return activeBorderColorEffect(); }},
-            std::pair{std::ref(m_inactiveBorderColor), [this] { return inactiveBorderColorEffect(); }}));
+    std::apply([&](auto&&... prop) { (resetRuleProp(prop.first.get(), props, prio, effectsNuked, prop.second), ...); },
+               std::make_tuple(std::pair{std::ref(m_alpha), [this] { return alphaEffect(); }},
+                               std::pair{std::ref(m_alphaInactive), [this] { return alphaInactiveEffect(); }},
+                               std::pair{std::ref(m_alphaFullscreen), [this] { return alphaFullscreenEffect(); }},
+                               std::pair{std::ref(m_allowsInput), [this] { return allowsInputEffect(); }},
+                               std::pair{std::ref(m_decorate), [this] { return decorateEffect(); }},
+                               std::pair{std::ref(m_focusOnActivate), [this] { return focusOnActivateEffect(); }},
+                               std::pair{std::ref(m_keepAspectRatio), [this] { return keepAspectRatioEffect(); }},
+                               std::pair{std::ref(m_nearestNeighbor), [this] { return nearestNeighborEffect(); }},
+                               std::pair{std::ref(m_noAnim), [this] { return noAnimEffect(); }},
+                               std::pair{std::ref(m_noBlur), [this] { return noBlurEffect(); }},
+                               std::pair{std::ref(m_noDim), [this] { return noDimEffect(); }},
+                               std::pair{std::ref(m_noFocus), [this] { return noFocusEffect(); }},
+                               std::pair{std::ref(m_noMaxSize), [this] { return noMaxSizeEffect(); }},
+                               std::pair{std::ref(m_noShadow), [this] { return noShadowEffect(); }},
+                               std::pair{std::ref(m_noGlow), [this] { return noGlowEffect(); }},
+                               std::pair{std::ref(m_noWobble), [this] { return noWobbleEffect(); }},
+                               std::pair{std::ref(m_noShortcutsInhibit), [this] { return noShortcutsInhibitEffect(); }},
+                               std::pair{std::ref(m_opaque), [this] { return opaqueEffect(); }},
+                               std::pair{std::ref(m_dimAround), [this] { return dimAroundEffect(); }},
+                               std::pair{std::ref(m_RGBX), [this] { return RGBXEffect(); }},
+                               std::pair{std::ref(m_syncFullscreen), [this] { return syncFullscreenEffect(); }},
+                               std::pair{std::ref(m_tearing), [this] { return tearingEffect(); }},
+                               std::pair{std::ref(m_xray), [this] { return xrayEffect(); }},
+                               std::pair{std::ref(m_renderUnfocused), [this] { return renderUnfocusedEffect(); }},
+                               std::pair{std::ref(m_noFollowMouse), [this] { return noFollowMouseEffect(); }},
+                               std::pair{std::ref(m_noScreenShare), [this] { return noScreenShareEffect(); }},
+                               std::pair{std::ref(m_noVRR), [this] { return noVRREffect(); }},
+                               std::pair{std::ref(m_noAutoHDR), [this] { return noAutoHDREffect(); }},
+                               std::pair{std::ref(m_persistentSize), [this] { return persistentSizeEffect(); }},
+                               std::pair{std::ref(m_stayFocused), [this] { return stayFocusedEffect(); }},
+                               std::pair{std::ref(m_idleInhibitMode), [this] { return idleInhibitModeEffect(); }},
+                               std::pair{std::ref(m_confinePointer), [this] { return confinePointerEffect(); }},
+                               std::pair{std::ref(m_noXdgDrags), [this] { return noXdgDragsEffect(); }},
+                               std::pair{std::ref(m_borderSize), [this] { return borderSizeEffect(); }},
+                               std::pair{std::ref(m_rounding), [this] { return roundingEffect(); }},
+                               std::pair{std::ref(m_roundingPower), [this] { return roundingPowerEffect(); }},
+                               std::pair{std::ref(m_scrollMouse), [this] { return scrollMouseEffect(); }},
+                               std::pair{std::ref(m_scrollTouchpad), [this] { return scrollTouchpadEffect(); }},
+                               std::pair{std::ref(m_animationStyle), [this] { return animationStyleEffect(); }},
+                               std::pair{std::ref(m_maxSize), [this] { return maxSizeEffect(); }},
+                               std::pair{std::ref(m_minSize), [this] { return minSizeEffect(); }},
+                               std::pair{std::ref(m_activeBorderColor), [this] { return activeBorderColorEffect(); }},
+                               std::pair{std::ref(m_inactiveBorderColor), [this] { return inactiveBorderColorEffect(); }}));
 
     if (prio == Types::PRIORITY_WINDOW_RULE) {
         std::erase_if(m_dynamicTags, [props, this](const auto& el) {
@@ -137,10 +157,25 @@ CWindowRuleApplicator::SRuleResult CWindowRuleApplicator::applyDynamicRule(const
                 break;
             }
             case WINDOW_RULE_EFFECT_BORDER_COLOR: {
-                const auto& borderColor   = std::get<SBorderColorRule>(value);
-                m_activeBorderColor.first = Types::COverridableVar(borderColor.active, Types::PRIORITY_WINDOW_RULE);
+                const auto& borderColor = std::get<SBorderColorRule>(value);
+
+                if (borderColor.active)
+                    m_activeBorderColor.first = Types::COverridableVar(*borderColor.active, Types::PRIORITY_WINDOW_RULE);
                 if (borderColor.inactive)
                     m_inactiveBorderColor.first = Types::COverridableVar(*borderColor.inactive, Types::PRIORITY_WINDOW_RULE);
+
+                if (rule->matches(Desktop::Rule::eRuleProperty::RULE_PROP_FOCUS, true)) {
+                    if (!borderColor.active && borderColor.inactive)
+                        m_activeBorderColor.first = Types::COverridableVar(*borderColor.inactive, Types::PRIORITY_WINDOW_RULE);
+                    else if (borderColor.active)
+                        m_activeBorderColor.first = Types::COverridableVar(*borderColor.active, Types::PRIORITY_WINDOW_RULE);
+                } else if (rule->matches(Desktop::Rule::eRuleProperty::RULE_PROP_FOCUS, false)) {
+                    if (!borderColor.inactive && borderColor.active)
+                        m_inactiveBorderColor.first = Types::COverridableVar(*borderColor.active, Types::PRIORITY_WINDOW_RULE);
+                    else if (borderColor.inactive)
+                        m_inactiveBorderColor.first = Types::COverridableVar(*borderColor.inactive, Types::PRIORITY_WINDOW_RULE);
+                }
+
                 m_activeBorderColor.second   = rule->getPropertiesMask();
                 m_inactiveBorderColor.second = rule->getPropertiesMask();
                 break;
@@ -161,7 +196,12 @@ CWindowRuleApplicator::SRuleResult CWindowRuleApplicator::applyDynamicRule(const
                 break;
             }
             case WINDOW_RULE_EFFECT_TAG: {
-                m_dynamicTags.emplace_back(effect, rule->getPropertiesMask());
+                if (!effect.starts_with("-")) {
+                    auto tag = effect.starts_with("+") ? effect.substr(1) : effect;
+                    if (tag.ends_with("*"))
+                        tag.pop_back();
+                    m_dynamicTags.emplace_back(std::move(tag), rule->getPropertiesMask());
+                }
                 m_tagKeeper.applyTag(effect, true);
                 result.tagsChanged = true;
                 break;

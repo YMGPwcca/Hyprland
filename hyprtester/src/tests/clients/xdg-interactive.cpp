@@ -6,6 +6,7 @@
 
 #include <hyprutils/os/FileDescriptor.hpp>
 #include <hyprutils/os/Process.hpp>
+#include <hyprutils/utils/ScopeGuard.hpp>
 
 #include <array>
 #include <chrono>
@@ -37,6 +38,7 @@ namespace {
         uint32_t lastButton         = 0;
         int      buttonPresses      = 0;
         bool     resizing           = false;
+        bool     fullscreen         = false;
     };
 
     class CClient {
@@ -63,6 +65,9 @@ namespace {
         bool                       requestResize(const std::string& edge);
         bool                       requestResizeWithSerial(uint32_t serial, const std::string& edge);
         bool                       requestRawResize(uint32_t edge);
+        bool                       requestMaximize(bool maximized);
+        bool                       createChild();
+        bool                       waitFullscreenMode(int mode);
         bool                       waitResizing(bool resizing);
         bool                       waitForDisconnect(int timeoutMs = 1500);
         pid_t                      pid() const;
@@ -77,16 +82,41 @@ static std::pair<int, int> parsePair(const std::string& str) {
     return {std::stoi(str.substr(0, COMMA)), std::stoi(str.substr(COMMA + 1))};
 }
 
-static SGeometry activeGeometry() {
-    const auto RESPONSE = getFromSocket("/activewindow");
-    const auto AT       = parsePair(Tests::getAttribute(RESPONSE, "at"));
-    const auto SIZE     = parsePair(Tests::getAttribute(RESPONSE, "size"));
+static SGeometry geometryFromResponse(const std::string& response) {
+    const auto AT   = parsePair(Tests::getAttribute(response, "at"));
+    const auto SIZE = parsePair(Tests::getAttribute(response, "size"));
     return {
         .x = AT.first,
         .y = AT.second,
         .w = SIZE.first,
         .h = SIZE.second,
     };
+}
+
+static SGeometry activeGeometry() {
+    return geometryFromResponse(getFromSocket("/activewindow"));
+}
+
+static bool waitForClientGeometry(pid_t pid, const std::string& appID, const SGeometry& geometry) {
+    const auto  START = std::chrono::steady_clock::now();
+    std::string response;
+    while (std::chrono::steady_clock::now() - START < std::chrono::seconds(2)) {
+        // Parent and child share a PID, so select the toplevel by app ID as well.
+        if (getFromSocket(std::format("/dispatch hl.dsp.focus({{ window = 'class:^{}$' }})", appID)) == "ok") {
+            response = getFromSocket("/activewindow");
+            if (Tests::getAttribute(response, "class") == appID && Tests::getAttribute(response, "pid") == std::to_string(pid) &&
+                Tests::getAttribute(response, "floating") == "1") {
+                const auto CURRENT = geometryFromResponse(response);
+                if (CURRENT.x == geometry.x && CURRENT.y == geometry.y && CURRENT.w == geometry.w && CURRENT.h == geometry.h)
+                    return true;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    NLog::red("Timed out waiting for {} geometry {},{} {}x{}: {}", appID, geometry.x, geometry.y, geometry.w, geometry.h, response);
+    return false;
 }
 
 static bool focusClient(pid_t pid) {
@@ -316,13 +346,14 @@ std::optional<SStatus> CClient::status() {
     if (!LINE)
         return std::nullopt;
 
-    const auto LEAVE    = statusValue(*LINE, "leave");
-    const auto MOTION   = statusValue(*LINE, "motion_after_request");
-    const auto BUTTON   = statusValue(*LINE, "last_button");
-    const auto PRESSES  = statusValue(*LINE, "button_presses");
-    const auto RESIZING = statusValue(*LINE, "resizing");
+    const auto LEAVE      = statusValue(*LINE, "leave");
+    const auto MOTION     = statusValue(*LINE, "motion_after_request");
+    const auto BUTTON     = statusValue(*LINE, "last_button");
+    const auto PRESSES    = statusValue(*LINE, "button_presses");
+    const auto RESIZING   = statusValue(*LINE, "resizing");
+    const auto FULLSCREEN = statusValue(*LINE, "fullscreen");
 
-    if (!LEAVE || !MOTION || !BUTTON || !PRESSES || !RESIZING)
+    if (!LEAVE || !MOTION || !BUTTON || !PRESSES || !RESIZING || !FULLSCREEN)
         return std::nullopt;
 
     return SStatus{
@@ -331,6 +362,7 @@ std::optional<SStatus> CClient::status() {
         .lastButton         = static_cast<uint32_t>(*BUTTON),
         .buttonPresses      = *PRESSES,
         .resizing           = *RESIZING == 1,
+        .fullscreen         = *FULLSCREEN == 1,
     };
 }
 
@@ -348,6 +380,35 @@ bool CClient::requestResizeWithSerial(uint32_t serial, const std::string& edge) 
 
 bool CClient::requestRawResize(uint32_t edge) {
     return sendCommand(std::format("resize-raw {}\n", edge)) && !!waitLineContaining("requested resize", 500);
+}
+
+bool CClient::requestMaximize(bool maximized) {
+    const std::string COMMAND = maximized ? "set-maximized" : "unset-maximized";
+    return sendCommand(COMMAND + "\n") && waitLineContaining("completed " + COMMAND).has_value();
+}
+
+bool CClient::createChild() {
+    return sendCommand("create-child\n") && waitLineContaining("child started", 2000).has_value();
+}
+
+bool CClient::waitFullscreenMode(int mode) {
+    const auto  START = std::chrono::steady_clock::now();
+    std::string response;
+    while (std::chrono::steady_clock::now() - START < std::chrono::seconds(2)) {
+        const auto STATUS = status();
+        if (!STATUS)
+            return false;
+
+        response = getFromSocket("/activewindow");
+        if (Tests::getAttribute(response, "pid") == std::to_string(pid()) && Tests::getAttribute(response, "fullscreen") == std::to_string(mode) &&
+            Tests::getAttribute(response, "fullscreenClient") == std::to_string(mode) && STATUS->fullscreen == (mode == 2))
+            return true;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    NLog::red("Timed out waiting for xdg-interactive fullscreen mode {}: {}", mode, response);
+    return false;
 }
 
 bool CClient::waitResizing(bool resizing) {
@@ -470,4 +531,107 @@ TEST_CASE(xdgInteractive) {
 
     client.reset();
     Tests::killAllWindows();
+}
+
+TEST_CASE(xdgInteractiveMaximizeToggle) {
+    std::optional<CClient> client;
+    try {
+        client.emplace();
+    } catch (...) { FAIL_TEST("Couldn't start the xdg-interactive client"); }
+
+    ASSERT(setClientGeometry(client->pid(), SGeometry{.x = 300, .y = 300, .w = 500, .h = 400}), true);
+    ASSERT(client->waitFullscreenMode(0), true);
+
+    // Hyprland treats either XDG maximize request as a toggle after mapping.
+    for (const bool MAXIMIZED : {true, false}) {
+        ASSERT(client->requestMaximize(MAXIMIZED), true);
+        ASSERT(client->waitFullscreenMode(1), true);
+        ASSERT(client->requestMaximize(MAXIMIZED), true);
+        ASSERT(client->waitFullscreenMode(0), true);
+    }
+}
+
+SUBTEST(maximizePreservesFullscreen, bool floating, bool maximized) {
+    Hyprutils::Utils::CScopeGuard workspaceGuard = {[]() { getFromSocket("/dispatch hl.dsp.focus({ workspace = '1' })"); }};
+
+    std::optional<CClient>        client;
+    try {
+        client.emplace();
+    } catch (...) { FAIL_TEST("Couldn't start the xdg-interactive client"); }
+
+    OK(getFromSocket(std::format("/dispatch hl.dsp.window.float({{ action = '{}', window = 'pid:{}' }})", floating ? "enable" : "disable", client->pid())));
+    ASSERT(Tests::getAttribute(getFromSocket("/activewindow"), "floating"), floating ? "1" : "0");
+    ASSERT(client->waitFullscreenMode(0), true);
+    OK(getFromSocket(std::format("/dispatch hl.dsp.window.fullscreen({{ mode = 'fullscreen', action = 'set', window = 'pid:{}' }})", client->pid())));
+    ASSERT(client->waitFullscreenMode(2), true);
+
+    ASSERT(client->requestMaximize(maximized), true);
+    ASSERT(client->waitFullscreenMode(2), true);
+
+    // Focus changes cause new configures, which can prompt Wine to unset maximized again.
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '101' })"));
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '1' })"));
+    ASSERT(focusClient(client->pid()), true);
+    ASSERT(client->waitFullscreenMode(2), true);
+    ASSERT(client->requestMaximize(maximized), true);
+    ASSERT(client->waitFullscreenMode(2), true);
+}
+
+TEST_CASE(xdgFloatingSetMaximizedPreservesFullscreen) {
+    CALL_SUBTEST(maximizePreservesFullscreen, true, true);
+}
+
+TEST_CASE(xdgFloatingUnsetMaximizedPreservesFullscreen) {
+    CALL_SUBTEST(maximizePreservesFullscreen, true, false);
+}
+
+TEST_CASE(xdgTiledSetMaximizedPreservesFullscreen) {
+    CALL_SUBTEST(maximizePreservesFullscreen, false, true);
+}
+
+TEST_CASE(xdgTiledUnsetMaximizedPreservesFullscreen) {
+    CALL_SUBTEST(maximizePreservesFullscreen, false, false);
+}
+
+SUBTEST(xdgChildPlacement, int forceOnscreen, const std::string& rule, const SGeometry& childGeometry) {
+    Hyprutils::Utils::CScopeGuard cleanup([&] {
+        EXPECT(Tests::killAllWindows(), true);
+        EXPECT_OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '1' })"));
+        EXPECT_OK(getFromSocket("/reload"));
+    });
+
+    OK(getFromSocket("/eval hl.monitor({ output = 'HEADLESS-2', mode = '1920x1080@60', position = '0x0', scale = '1', transform = 0 })"));
+    OK(getFromSocket("/dispatch hl.dsp.focus({ monitor = 'HEADLESS-2' })"));
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = 'name:xdg_child_placement' })"));
+    OK(getFromSocket(
+        std::format("/eval hl.config({{ animations = {{ enabled = false }}, input = {{ follow_mouse = 0 }}, misc = {{ new_float_force_onscreen = {} }} }})", forceOnscreen)));
+    if (!rule.empty())
+        OK(getFromSocket(std::format("/eval hl.window_rule({{ match = {{ class = '^xdg-interactive-child$' }}, {} }})", rule)));
+
+    std::optional<CClient> client;
+    try {
+        client.emplace();
+    } catch (...) { FAIL_TEST("Couldn't start the xdg-interactive client"); }
+
+    // Keep the parent off-center and both windows fully onscreen, so clamping cannot hide a placement error.
+    const SGeometry PARENT = {.x = 200, .y = 200, .w = 600, .h = 400};
+    ASSERT(setClientGeometry(client->pid(), PARENT), true);
+    ASSERT(client->createChild(), true);
+    ASSERT(waitForClientGeometry(client->pid(), "xdg-interactive-child", childGeometry), true);
+    EXPECT(Tests::windowCount(), 2);
+    EXPECT(waitForClientGeometry(client->pid(), "xdg-interactive", PARENT), true);
+}
+
+TEST_CASE(xdgChildCenteredOnParent) {
+    for (const int MODE : {0, 1, 2}) {
+        CALL_SUBTEST(xdgChildPlacement, MODE, "", SGeometry{.x = 380, .y = 320, .w = 240, .h = 160});
+    }
+}
+
+TEST_CASE(xdgChildMoveRuleOverridesParentPlacement) {
+    CALL_SUBTEST(xdgChildPlacement, 2, "move = {700, 250}", SGeometry{.x = 700, .y = 250, .w = 240, .h = 160});
+}
+
+TEST_CASE(xdgChildCenterRuleOverridesParentPlacement) {
+    CALL_SUBTEST(xdgChildPlacement, 2, "center = true", SGeometry{.x = 840, .y = 460, .w = 240, .h = 160});
 }

@@ -17,6 +17,7 @@
 #include "../../../layout/target/Target.hpp"
 #include "../../../layout/target/WindowGroupTarget.hpp"
 #include "../../../layout/target/WindowTarget.hpp"
+#include "../../../layout/target/WindowGeometry.hpp"
 
 #include "../../../render/Renderer.hpp"
 #include "../../../animation/WorkspaceAnimationController.hpp"
@@ -209,7 +210,7 @@ void IFullscreenHandler::setTargetSizeAndPosition(const SP<Layout::ITarget> targ
         Fullscreen::controller()->m_windowPosSettingQueued = true;
         LAYOUT_TARGET->setPositionGlobal(MONBOX);
     } else if (TARGET_INTERNAL_MODE == FSMODE_MAXIMIZED) {
-        const CBox WORKAREA                                = WORKSPACE->m_space->workArea(target->floating());
+        const CBox WORKAREA                                = WORKSPACE->space()->workArea(target->floating());
         Fullscreen::controller()->m_windowPosSettingQueued = true;
         LAYOUT_TARGET->setPositionGlobal(WORKAREA);
     }
@@ -252,7 +253,7 @@ void IFullscreenHandler::syncTargetSizeAndPosition() {
         }
     } else if (TARGET_INTERNAL_MODE == FSMODE_MAXIMIZED) {
 
-        const auto WORK_AREA       = WORKSPACE->m_space->workArea(FS_TARGET->floating());
+        const auto WORK_AREA       = WORKSPACE->space()->workArea(FS_TARGET->floating());
         auto       roundedWorkArea = WORK_AREA;
         roundedWorkArea.round();
 
@@ -262,12 +263,13 @@ void IFullscreenHandler::syncTargetSizeAndPosition() {
         const auto CURRENT_REAL_POS_GOAL  = WINDOW.get()->position(Desktop::View::IGeometric::GEOMETRIC_GOAL);
         const auto CURRENT_REAL_SIZE_GOAL = WINDOW.get()->size(Desktop::View::IGeometric::GEOMETRIC_GOAL);
 
-        const auto EXPECTED_REAL_POS  = roundedWorkArea.pos() + RESERVED.topLeft;
-        const auto EXPECTED_REAL_SIZE = roundedWorkArea.size() - (RESERVED.topLeft + RESERVED.bottomRight);
+        auto       expectedBox = CBox{roundedWorkArea.pos() + RESERVED.topLeft, roundedWorkArea.size() - RESERVED.topLeft - RESERVED.bottomRight};
+        if (std::floor(MONITOR->m_scale) != MONITOR->m_scale && WINDOW->presentation().borderExtent() > 0)
+            expectedBox = Layout::windowContentBox(roundedWorkArea, RESERVED, MONITOR->m_position, MONITOR->m_scale);
 
-        if (CURRENT_REAL_POS_GOAL != EXPECTED_REAL_POS || CURRENT_REAL_SIZE_GOAL != EXPECTED_REAL_SIZE) {
+        if (CURRENT_REAL_POS_GOAL != expectedBox.pos() || CURRENT_REAL_SIZE_GOAL != expectedBox.size()) {
             controller()->m_windowPosSettingQueued = true;
-            LAYOUT_TARGET->setPositionGlobal(WORKSPACE->m_space->workArea(FS_TARGET->floating()));
+            LAYOUT_TARGET->setPositionGlobal(WORKSPACE->space()->workArea(FS_TARGET->floating()));
         }
     }
     Fullscreen::controller()->m_windowPosSettingQueued = false;
@@ -289,6 +291,8 @@ void IFullscreenHandler::setNoMembersAboveFullscreen(const std::optional<SP<Layo
             w->updateFullscreenInputState();
         }
     }
+
+    // Hide the top layer window when fullscreening a window
     for (auto const& ls : Desktop::layerState()->layers()) {
         if (ls->m_monitor != MONITOR)
             continue;
@@ -300,22 +304,29 @@ void IFullscreenHandler::setNoMembersAboveFullscreen(const std::optional<SP<Layo
 void IFullscreenHandler::syncFullscreenTargets() {
     // Mode checking logic is the same as getFullscreenModes() - keep it in sync
 
+    const auto removeTargetFromList = [&](auto& it) { it = m_fsTargets.erase(it); };
+
+    const auto removeFsTargetAndreturnNextIter = [&](auto& it, const auto& TARGET) {
+        const auto NEXT = std::next(it);
+        removeFsTarget(TARGET, true);
+        return NEXT;
+    };
+
     // to prevent a rehash
     std::vector<std::pair<WP<Layout::ITarget>, SFullscreenMode>> toInsert;
 
     for (auto it = m_fsTargets.begin(); it != m_fsTargets.end();) {
 
-        // Somehow happens sometimes and causes WP<> to segfault
-        if (m_fsTargets.empty())
-            return;
+        const auto TARGET = it->first.lock();
 
-        // Rigorously check if WP<> is valid as WP<> randomly segfaults sometimes without this
-        const auto TARGET = !it->first.expired() && it->first.valid() && it->first ? it->first.lock() : nullptr;
+        // expired/invalid entries. We need not perform any post-removal operations on these
+        if (!TARGET || !TARGET->window()) {
+            removeTargetFromList(it);
+            continue;
+        }
 
-        if (!TARGET || !TARGET->window() || (!isFullscreen(TARGET) && it->second.client == FSMODE_NONE)) {
-            const auto NEXT = std::next(it);
-            removeFsTarget(TARGET, true);
-            it = NEXT;
+        if (!isFullscreen(TARGET) && it->second.client == FSMODE_NONE) {
+            it = removeFsTargetAndreturnNextIter(it, TARGET);
             continue;
         }
 
@@ -324,13 +335,21 @@ void IFullscreenHandler::syncFullscreenTargets() {
             const SFullscreenMode MODE = SFullscreenMode{.internal = it->second.internal, .client = it->second.client};
             // gets the current window's target in the window group
             const auto WINDOWTARGET = TARGET->window()->windowTarget();
-            const auto NEXT         = std::next(it);
-            removeFsTarget(TARGET, true);
-            it = NEXT;
+
+            if (!WINDOWTARGET) {
+                removeTargetFromList(it);
+                continue;
+            }
+
+            if (!isFullscreen(WINDOWTARGET) && MODE.client == FSMODE_NONE) {
+                it = removeFsTargetAndreturnNextIter(it, TARGET);
+                continue;
+            }
+            // do post-remove-ops on the window group target as that's what algorithms store as a target, then save only the current window of the group
+            it = removeFsTargetAndreturnNextIter(it, TARGET);
             toInsert.emplace_back(WINDOWTARGET, MODE);
             continue;
         }
-
         ++it;
     }
 
@@ -340,9 +359,16 @@ void IFullscreenHandler::syncFullscreenTargets() {
 }
 
 void IFullscreenHandler::removeFsTarget(SP<Layout::ITarget> target, const bool recursionGuard) {
-    const auto ITER = m_fsTargets.find(target);
-    if (ITER != m_fsTargets.end())
-        m_fsTargets.erase(ITER);
+
+    // This should not be done because if there are 2 expired elements in the list, this will remove one of them with little guarantee as to which and the caller is preumsably looking forward and getting the next
+    // iterator in the list; which would corrupt the map if that next iter is also nullptr. We let this go through on the offchance that there is Ǝ! expired entries or the erase hits the right expired target but it is
+    // non-deterministic
+    if (!target)
+        Log::logger->log(
+            Log::CRIT,
+            "IFullscreenHandler::removeFsTarget() called with target = nullptr. This is possibly non-deterministic and should NOT happen. This is a bug and should be reported!");
+
+    m_fsTargets.erase(target);
 
     if (!recursionGuard)
         syncFullscreenTargets();

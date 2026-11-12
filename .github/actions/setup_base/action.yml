@@ -25,8 +25,8 @@ runs:
           glslang \
           go \
           gtest \
-          hyprlang \
           hyprcursor \
+          hyprland-protocols \
           jq \
           libc++ \
           libcanberra \
@@ -57,7 +57,6 @@ runs:
           pkgconf \
           pugixml \
           scdoc \
-          sdbus-cpp \
           seatd \
           systemd \
           tomlplusplus \

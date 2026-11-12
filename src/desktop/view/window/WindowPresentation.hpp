@@ -8,10 +8,21 @@
 #include "../../../render/decorations/IHyprWindowDecoration.hpp"
 #include "../../types/MultiAnimatedVariable.hpp"
 #include "../animationControllers/WindowAnimationController.hpp"
+#include "FloatingOffset.hpp"
 
 class CHyprBorderDecoration;
 class CHyprDropShadowDecoration;
 class CHyprInnerGlowDecoration;
+
+namespace Workspace {
+    class CWorkspacePresentable;
+}
+
+namespace Render {
+    struct SWindowRenderPresentation;
+    struct SWindowPresentationState;
+    enum class eSceneMode : uint8_t;
+}
 
 namespace Desktop::View {
     class CWindow;
@@ -48,8 +59,13 @@ namespace Desktop::View {
         float                                             alphaTotalGoal() const;
 
         int                                               borderSize() const;
+        double                                            borderExtent() const;
         void                                              invalidateBorderSize();
         bool                                              opaque() const;
+        bool                                              opaque(const Render::SWindowRenderPresentation& presentation) const;
+        Render::SWindowRenderPresentation                 renderPresentation() const;
+        Render::SWindowRenderPresentation                 renderPresentation(Render::eSceneMode mode) const;
+        Render::SWindowRenderPresentation                 renderPresentation(const SP<Workspace::CWorkspacePresentable>& presentation) const;
         float                                             rounding();
         float                                             roundingPower();
         bool                                              isInCurvedCorner(double x, double y);
@@ -62,6 +78,7 @@ namespace Desktop::View {
         void                                              setNotResponding(bool notResponding);
 
         const Vector2D&                                   floatingOffset() const;
+        eFloatingOffsetSource                             floatingOffsetSource() const;
         void                                              setFloatingOffset(const Vector2D& offset);
         void                                              clearFloatingOffset();
         bool                                              movingFromMonitor() const;
@@ -81,6 +98,7 @@ namespace Desktop::View {
         void                                              applyAnimateIn() const;
 
       private:
+        Render::SWindowPresentationState           renderPresentationState(const SP<Workspace::CWorkspacePresentable>& presentation) const;
         void                                       addDecorationInternal(const SP<IHyprWindowDecoration>& decoration);
 
         CWindow&                                   m_window;
@@ -92,7 +110,7 @@ namespace Desktop::View {
         Types::CMultiAVarContainer<float, uint8_t> m_alpha;
         PHLANIMVAR<float>                          m_dimPercent;
         PHLANIMVAR<float>                          m_notRespondingTint;
-        Vector2D                                   m_floatingOffset;
+        CFloatingOffset                            m_floatingOffset;
         int                                        m_monitorMovedFrom = -1;
         bool                                       m_animatingIn      = false;
         CWindowAnimationController                 m_animationController;

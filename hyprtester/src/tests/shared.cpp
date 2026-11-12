@@ -12,6 +12,9 @@
 using namespace Hyprutils::OS;
 using namespace Hyprutils::Memory;
 
+// TODO: when run locally, the user's default shell affects the behavior of kitty.
+//       For instance, the `fish` shell will change the window name shortly after a window is open.
+//       Should we always launch kitty with `sh` by default?
 CUniquePointer<CProcess> Tests::spawnKitty(const std::string& class_, const std::vector<std::string> args) {
     const auto               COUNT_BEFORE = windowCount();
 
@@ -168,6 +171,20 @@ bool Tests::killAllLayers() {
     return true;
 }
 
+void Tests::waitUntilLayersN(int n) {
+
+    int counter = 0;
+    while (Tests::layerCount() != n) {
+        counter++;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        if (counter > 50) {
+            std::println("{}Timed out waiting for layers", Colors::RED);
+            return;
+        }
+    }
+}
+
 std::string Tests::execAndGet(const std::string& cmd) {
     CProcess proc("/bin/sh", {"-c", cmd});
 
@@ -199,4 +216,10 @@ std::string Tests::getAttribute(const std::string& hyprlandResponse, std::string
     pos += attr.size();
     auto pos2 = hyprlandResponse.find('\n', pos);
     return hyprlandResponse.substr(pos, pos2 - pos);
+}
+
+std::string Tests::getWindowID(const std::string& hyprlandActiveWindowResponse) {
+    // Depends on the window ID line being formatted like `Window 6205fe70d6e0 -> bash:` -- i.e. 12 char ID after `Window`
+
+    return hyprlandActiveWindowResponse.substr(7, 12);
 }

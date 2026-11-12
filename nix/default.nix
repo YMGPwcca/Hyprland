@@ -4,7 +4,7 @@
   stdenvAdapters,
   pkg-config,
   pkgconf,
-  makeWrapper,
+  makeBinaryWrapper,
   cmake,
   aquamarine,
   binutils,
@@ -18,7 +18,6 @@
   hyprgraphics,
   hyprland-protocols,
   hyprland-guiutils,
-  hyprlang,
   hyprutils,
   hyprwayland-scanner,
   hyprwire,
@@ -44,7 +43,6 @@
   pciutils,
   python3,
   re2,
-  sdbus-cpp_2,
   systemd,
   tomlplusplus,
   udis86-hyprland,
@@ -97,7 +95,7 @@ in
 assert assertMsg (!nvidiaPatches) "The option `nvidiaPatches` has been removed.";
 assert assertMsg (!enableNvidiaPatches) "The option `enableNvidiaPatches` has been removed.";
 assert assertMsg (!hidpiXWayland)
-  "The option `hidpiXWayland` has been removed. Please refer https://wiki.hypr.land/Configuring/XWayland";
+  "The option `hidpiXWayland` has been removed. Please refer https://wiki.hypr.land/configuring/extra/xwayland/";
 assert assertMsg (
   !legacyRenderer
 ) "The option `legacyRenderer` has been removed. Legacy renderer is no longer supported.";
@@ -129,7 +127,7 @@ customStdenv.mkDerivation (finalAttrs: {
             ../systemd
             ../VERSION
             (fs.fileFilter (file: file.hasExt "1") ../docs)
-            (fs.fileFilter (file: file.hasExt "conf" || file.hasExt "in" || file.hasExt "lua" ) ../example)
+            (fs.fileFilter (file: file.hasExt "conf" || file.hasExt "in" || file.hasExt "lua") ../example)
             (fs.fileFilter (file: file.hasExt "sh") ../scripts)
             (fs.fileFilter (file: file.name == "CMakeLists.txt") ../.)
             (optional withTests [
@@ -164,7 +162,7 @@ customStdenv.mkDerivation (finalAttrs: {
   nativeBuildInputs = [
     hyprwayland-scanner
     hyprwire
-    makeWrapper
+    makeBinaryWrapper
     cmake
     pkg-config
     python3
@@ -187,7 +185,6 @@ customStdenv.mkDerivation (finalAttrs: {
       hyprcursor
       hyprgraphics
       hyprland-protocols
-      hyprlang
       hyprutils
       hyprwire
       lcms2
@@ -205,7 +202,6 @@ customStdenv.mkDerivation (finalAttrs: {
       pango
       pciutils
       re2
-      sdbus-cpp_2
       tomlplusplus
       udis86-hyprland
       wayland
@@ -265,14 +261,18 @@ customStdenv.mkDerivation (finalAttrs: {
 
     ${optionalString withTests ''
       install hyprtester/pointer-warp -t $out/bin
+      install hyprtester/pointer-constraints -t $out/bin
       install hyprtester/pointer-scroll -t $out/bin
       install hyprtester/shortcut-inhibitor -t $out/bin
       install hyprtester/keyboard-modifiers -t $out/bin
       install hyprtester/fullscreen-with-monitor -t $out/bin
       install hyprtester/surface-scale-transform -t $out/bin
       install hyprtester/xdg-interactive -t $out/bin
+      install hyprtester/xdg-activation -t $out/bin
       install hyprtester/xdg-initial-maximize -t $out/bin
+      install hyprtester/popup-render -t $out/bin
       install hyprtester/wlr-foreign-toplevel -t $out/bin
+      install hyprtester/toplevel-capture -t $out/bin
       install hyprland_gtests -t $out/bin
       install hyprtester/child-window -t $out/bin
     ''}

@@ -1,6 +1,7 @@
 #pragma once
 #include "PassElement.hpp"
 #include "TexPassElement.hpp"
+#include "../WindowRenderPresentation.hpp"
 #include <optional>
 #include "../../helpers/time/Time.hpp"
 
@@ -43,25 +44,26 @@ class CSurfacePassElement : public IPassElement {
         bool      popup = false;
 
         // counts how many surfaces this pass has rendered
-        int     surfaceCounter = 0;
+        int                               surfaceCounter = 0;
 
-        CBox    clipBox = {}; // scaled coordinates
+        CBox                              clipBox = {}; // scaled coordinates
 
-        uint8_t discardMode    = DISCARD_OPAQUE;
-        float   discardOpacity = 0.f;
+        uint8_t                           discardMode    = DISCARD_OPAQUE;
+        float                             discardOpacity = 0.f;
 
-        bool    useNearestNeighbor = false;
+        bool                              useNearestNeighbor = false;
+        Render::SWindowRenderPresentation workspacePresentation;
     };
 
     CSurfacePassElement(const SRenderData& data);
     virtual ~CSurfacePassElement() = default;
 
-    virtual bool                needsLiveBlur();
-    virtual bool                needsPrecomputeBlur();
-    virtual std::optional<CBox> boundingBox();
-    virtual CRegion             opaqueRegion();
-    virtual void                discard();
-    CRegion                     visibleRegion(bool& cancel);
+    virtual bool                needsLiveBlur(Render::CRenderContext& ctx);
+    virtual bool                needsPrecomputeBlur(Render::CRenderContext& ctx);
+    virtual std::optional<CBox> boundingBox(Render::CRenderContext& ctx);
+    virtual CRegion             opaqueRegion(Render::CRenderContext& ctx);
+    virtual void                discard(Render::CRenderContext& ctx);
+    CRegion                     visibleRegion(Render::CRenderContext& ctx, bool& cancel);
 
     virtual const char*         passName() {
         return "CSurfacePassElement";

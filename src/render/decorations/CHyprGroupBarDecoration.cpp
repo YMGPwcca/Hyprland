@@ -12,6 +12,7 @@
 #include "../pass/TexPassElement.hpp"
 #include "../pass/RectPassElement.hpp"
 #include "../Renderer.hpp"
+#include "../WindowRenderPresentation.hpp"
 #include "../../managers/input/InputManager.hpp"
 #include "../../managers/fullscreen/FullscreenController.hpp"
 #include "../../layout/LayoutManager.hpp"
@@ -98,7 +99,7 @@ void CHyprGroupBarDecoration::damageEntire() {
     g_pHyprRenderer->damageBox(box);
 }
 
-void CHyprGroupBarDecoration::draw(PHLMONITOR pMonitor, float const& a) {
+void CHyprGroupBarDecoration::draw(Render::CRenderContext& ctx, PHLMONITOR pMonitor, float const& a, const Render::SWindowRenderPresentation& presentation) {
     // get how many bars we will draw
     int        barsToDraw = m_dwGroupMembers.size();
 
@@ -140,7 +141,7 @@ void CHyprGroupBarDecoration::draw(PHLMONITOR pMonitor, float const& a) {
     auto* const GROUPCOLACTIVELOCKED       = sc<Config::CGradientValueData*>((PGROUPCOLACTIVELOCKED.ptr()));
     auto* const GROUPCOLINACTIVELOCKED     = sc<Config::CGradientValueData*>((PGROUPCOLINACTIVELOCKED.ptr()));
 
-    const auto  ASSIGNEDBOX = assignedBoxGlobal();
+    const auto  ASSIGNEDBOX = assignedBoxGlobal(presentation);
 
     const auto  ONEBARHEIGHT = *POUTERGAP + *PINDICATORHEIGHT + *PINDICATORGAP + (*PGRADIENTS || *PRENDERTITLES ? *PHEIGHT : 0);
     m_barWidth               = *PSTACKED ? ASSIGNEDBOX.w : (ASSIGNEDBOX.w - *PINNERGAP * (barsToDraw - 1)) / barsToDraw;
@@ -158,7 +159,7 @@ void CHyprGroupBarDecoration::draw(PHLMONITOR pMonitor, float const& a) {
     for (int i = 0; i < barsToDraw; ++i) {
         const auto WINDOWINDEX = *PSTACKED ? m_dwGroupMembers.size() - i - 1 : i;
 
-        const auto FLOATING_OFFSET = m_window->presentation().floatingOffset();
+        const auto FLOATING_OFFSET = presentation.floatingOffset;
         CBox rect = {ASSIGNEDBOX.x + xoff - pMonitor->m_position.x + FLOATING_OFFSET.x,
                      ASSIGNEDBOX.y + ASSIGNEDBOX.h - floor(yoff) - *PINDICATORHEIGHT - *POUTERGAP - pMonitor->m_position.y + FLOATING_OFFSET.y, m_barWidth, *PINDICATORHEIGHT};
 
@@ -173,9 +174,10 @@ void CHyprGroupBarDecoration::draw(PHLMONITOR pMonitor, float const& a) {
 
         if (!rect.empty()) {
             CRectPassElement::SRectData rectdata;
-            rectdata.color = color;
-            rectdata.blur  = blur;
-            rectdata.box   = rect;
+            rectdata.color                 = color;
+            rectdata.blur                  = blur;
+            rectdata.box                   = rect;
+            rectdata.workspacePresentation = presentation;
             if (*PROUNDING) {
                 rectdata.round         = *PROUNDING;
                 rectdata.roundingPower = *PROUNDINGPOWER;
@@ -193,13 +195,13 @@ void CHyprGroupBarDecoration::draw(PHLMONITOR pMonitor, float const& a) {
                     }
                 }
             }
-            g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(rectdata));
+            g_pHyprRenderer->addPassElement(ctx, makeUnique<CRectPassElement>(rectdata));
         }
 
         rect = {ASSIGNEDBOX.x + xoff - pMonitor->m_position.x + FLOATING_OFFSET.x,
                 ASSIGNEDBOX.y + ASSIGNEDBOX.h - floor(yoff) - ONEBARHEIGHT - pMonitor->m_position.y + FLOATING_OFFSET.y, m_barWidth,
                 (*PGRADIENTS || *PRENDERTITLES ? *PHEIGHT : 0)};
-        rect.scale(pMonitor->m_scale);
+        rect.scale(pMonitor->m_scale).round();
 
         if (!rect.empty()) {
             if (*PGRADIENTS) {
@@ -207,10 +209,11 @@ void CHyprGroupBarDecoration::draw(PHLMONITOR pMonitor, float const& a) {
                                                                                                              (GROUPLOCKED ? m_tGradientLockedInactive : m_tGradientInactive));
                 if (GRADIENTTEX && GRADIENTTEX->ok()) {
                     CTexPassElement::SRenderData data;
-                    data.tex  = GRADIENTTEX;
-                    data.blur = blur;
-                    data.box  = rect;
-                    data.a    = a;
+                    data.tex                   = GRADIENTTEX;
+                    data.blur                  = blur;
+                    data.box                   = rect;
+                    data.a                     = a;
+                    data.workspacePresentation = presentation;
                     if (*PGRADIENTROUNDING) {
                         data.round         = *PGRADIENTROUNDING;
                         data.roundingPower = *PGRADIENTROUNDINGPOWER;
@@ -228,7 +231,7 @@ void CHyprGroupBarDecoration::draw(PHLMONITOR pMonitor, float const& a) {
                             }
                         }
                     }
-                    g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(data));
+                    g_pHyprRenderer->addPassElement(ctx, makeUnique<CTexPassElement>(data));
                 }
             }
 
@@ -259,7 +262,7 @@ void CHyprGroupBarDecoration::draw(PHLMONITOR pMonitor, float const& a) {
                 data.tex = titleTex;
                 data.box = rect;
                 data.a   = a;
-                g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(std::move(data)));
+                g_pHyprRenderer->addPassElement(ctx, makeUnique<CTexPassElement>(std::move(data)));
             }
         }
 
@@ -540,15 +543,16 @@ std::string CHyprGroupBarDecoration::getDisplayName() {
 }
 
 CBox CHyprGroupBarDecoration::assignedBoxGlobal() {
+    return assignedBoxGlobal(m_window->presentation().renderPresentation());
+}
+
+CBox CHyprGroupBarDecoration::assignedBoxGlobal(const Render::SWindowRenderPresentation& presentation) {
     CBox box = m_assignedBox;
     box.translate(g_pDecorationPositioner->getEdgeDefinedPoint(DECORATION_EDGE_TOP, m_window));
 
-    const auto PWORKSPACE = m_window->m_workspace;
+    box.translate(presentation.workspaceOffset);
 
-    if (PWORKSPACE && !(m_window->m_state & Desktop::View::WINDOW_STATE_PINNED))
-        box.translate(PWORKSPACE->m_renderOffset->value());
-
-    return box.round();
+    return box;
 }
 
 bool CHyprGroupBarDecoration::visible() {

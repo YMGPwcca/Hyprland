@@ -70,6 +70,25 @@ static bool waitForMirror(const std::string& source, const std::string& targetID
     return false;
 }
 
+static std::string expectMonitorRenderStages(const std::string& name, bool mirror, std::optional<bool> workspaceProbe = std::nullopt) {
+    CScopeGuard resetRecording([] { getFromSocket("/eval hl.plugin.test.reset_monitor_render_recording()"); });
+    const auto  ARMED =
+        getFromSocket(std::format("/eval hl.plugin.test.arm_monitor_render_recording('{}'{})", name, workspaceProbe ? (*workspaceProbe ? ", true" : ", false") : ""));
+    if (ARMED != "ok")
+        return ARMED;
+
+    std::string result;
+    for (int i = 0; i < 50; ++i) {
+        result = getFromSocket(std::format("/eval hl.plugin.test.check_monitor_render_recording({})", mirror ? "true" : "false"));
+        if (!result.contains("Monitor render pending:"))
+            return result;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    return std::format("Timed out waiting for {} frame on '{}': {}", mirror ? "mirror" : "normal", name, result);
+}
+
 static void removeMirrorTestOutputs() {
     if (!monitorBlock(TEST_MIRROR_TARGET, false).empty()) {
         getFromSocket(std::format("/output remove {}", TEST_MIRROR_TARGET));
@@ -97,6 +116,7 @@ TEST_CASE(monitorMirrorAppliedWhenTargetAppears) {
     ASSERT(waitForMonitor(TEST_MIRROR_SOURCE, true), true);
     EXPECT_CONTAINS(monitorBlock(TEST_MIRROR_SOURCE), "mirrorOf: none");
     EXPECT(monitorBlock(TEST_MIRROR_SOURCE, false).empty(), false);
+    OK(expectMonitorRenderStages(TEST_MIRROR_SOURCE, false));
 
     OK(getFromSocket(std::format("/output create headless {}", TEST_MIRROR_TARGET)));
     ASSERT(waitForMonitor(TEST_MIRROR_TARGET, true), true);
@@ -106,12 +126,18 @@ TEST_CASE(monitorMirrorAppliedWhenTargetAppears) {
     ASSERT(waitForMirror(TEST_MIRROR_SOURCE, *TARGET_ID), true);
     EXPECT(monitorBlock(TEST_MIRROR_SOURCE, false).empty(), true);
     EXPECT(monitorBlock(TEST_MIRROR_TARGET, false).empty(), false);
+    OK(expectMonitorRenderStages(TEST_MIRROR_SOURCE, true));
+    OK(expectMonitorRenderStages(TEST_MIRROR_TARGET, false));
+    // Exercise resource isolation with an existing monitor-owned mirror cache.
+    OK(getFromSocket("/eval hl.config({ misc = { disable_hyprland_logo = true, disable_splash_rendering = true } })"));
+    OK(expectMonitorRenderStages(TEST_MIRROR_TARGET, false, false));
     ASSERT_CONTAINS(getFromSocket("/version"), "Hyprland");
 
     OK(getFromSocket(std::format("/output remove {}", TEST_MIRROR_TARGET)));
     ASSERT(waitForMonitor(TEST_MIRROR_TARGET, false), true);
     ASSERT(waitForMonitor(TEST_MIRROR_SOURCE, true, false), true);
     EXPECT_CONTAINS(monitorBlock(TEST_MIRROR_SOURCE), "mirrorOf: none");
+    OK(expectMonitorRenderStages(TEST_MIRROR_SOURCE, false));
 
     OK(getFromSocket(std::format("/output create headless {}", TEST_MIRROR_TARGET)));
     ASSERT(waitForMonitor(TEST_MIRROR_TARGET, true), true);
@@ -120,4 +146,23 @@ TEST_CASE(monitorMirrorAppliedWhenTargetAppears) {
     ASSERT(RECREATED_TARGET_ID.has_value(), true);
     ASSERT(waitForMirror(TEST_MIRROR_SOURCE, *RECREATED_TARGET_ID), true);
     EXPECT(monitorBlock(TEST_MIRROR_SOURCE, false).empty(), true);
+    OK(expectMonitorRenderStages(TEST_MIRROR_SOURCE, true));
+}
+
+TEST_CASE(monitorBackgroundWorkspaceAndXpMode) {
+    removeMirrorTestOutputs();
+    CScopeGuard cleanup([] { removeMirrorTestOutputs(); });
+    OK(getFromSocket(std::format("/eval hl.monitor({{ output = '{}', mode = '1920x1080@60', position = 'auto-right', scale = '1' }}); "
+                                 "hl.config({{ misc = {{ disable_hyprland_logo = true, disable_splash_rendering = true }} }})",
+                                 TEST_MIRROR_SOURCE)));
+    OK(getFromSocket(std::format("/output create headless {}", TEST_MIRROR_SOURCE)));
+    ASSERT(waitForMonitor(TEST_MIRROR_SOURCE, true, false), true);
+    OK(getFromSocket(std::format("/dispatch hl.dsp.focus({{ monitor = '{}' }})", TEST_MIRROR_SOURCE)));
+    for (const bool XP_MODE : {false, true}) {
+        OK(getFromSocket(std::format("/eval hl.config({{ render = {{ xp_mode = {} }} }})", XP_MODE ? "true" : "false")));
+        for (const bool WITH_WORKSPACE : {true, false}) {
+            NLog::log("Checking background: workspace {}, xp_mode {}", WITH_WORKSPACE, XP_MODE);
+            EXPECT_OK(expectMonitorRenderStages(TEST_MIRROR_SOURCE, false, WITH_WORKSPACE));
+        }
+    }
 }
