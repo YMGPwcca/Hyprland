@@ -99,11 +99,11 @@ namespace SpecialWorkspaceGestures {
     }
 
     static void update(double delta, eTrackpadGestureDirection direction = TRACKPAD_GESTURE_DIR_HORIZONTAL) {
-        Vector2D DELTA{delta, 0};
+        Vector2D DELTA{delta, 0.0};
         if (direction == TRACKPAD_GESTURE_DIR_UP)
-            DELTA = {0, -delta};
+            DELTA = {0.0, -delta};
         else if (direction == TRACKPAD_GESTURE_DIR_DOWN)
-            DELTA = {0, delta};
+            DELTA = {0.0, delta};
         const IPointer::SSwipeUpdateEvent EVENT{.fingers = 3, .delta = DELTA};
         g_gesture->update({.swipe = &EVENT, .direction = direction});
     }
